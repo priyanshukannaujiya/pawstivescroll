@@ -9,14 +9,14 @@ import {
   Flame, Skull, Droplets, Package, Radar, Map as MapIcon,
   FileText, BarChart3, Radio, ChevronLeft, Share, Users, RotateCcw
 } from 'lucide-react';
-import Utils from './api_services/utils';
+
 // --- GOOGLE AI IMPORT ---
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // --- MAP IMPORTS ---
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import  { Util } from 'leaflet';
 
 // --- API CONFIGURATION ---
 const API_KEY = "AIzaSyBKjHNtEZLuiYealX8N6LG9aTPMMixf1FE";
@@ -66,6 +66,15 @@ const styles = `
   .no-scrollbar {
     -ms-overflow-style: none;
     scrollbar-width: none;
+  }
+  @keyframes ticker {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+  .animate-ticker {
+    display: flex;
+    width: max-content;
+    animation: ticker 30s linear infinite;
   }
 `;
 
@@ -134,22 +143,14 @@ const INITIAL_FEED = [
     image: "https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=1200", 
     author: { name: "Dr. Ananya Rai", role: "Field Director", avatar: "AR" },
     date: "JAN 29, 2026", readTime: "5 min read", status: "Active",
-    content: "Official Directive: All divisions must now sync Bio-Scan data before initiating clinic transport. This ensures real-time medical logistics tracking for high-priority subjects. \n\nField agents are advised to update their firmware to version 4.2. Failure to comply may result in delayed dispatch coordination. The new protocol prioritizes 'Critical' flagged cases in the Sector Grid.",
+    content: "Official Directive: All divisions must now sync Bio-Scan data before initiating clinic transport. Field agents are advised to update firmware.",
     location: "National HQ", liked: false, likesCount: 420, comments: [], verified: true 
   },
   { 
     type: 'adoption', id: 101, name: "Cooper - Case ID 104", age: "5 months", breed: "Indie Mix", 
-    bio: "Subject found with minor leg trauma in Mumbai Central. Fully rehabilitated. High energy levels detected. Suitable for active patrol families. Cooper excels in agility drills and responds to basic tactical commands. Vaccination status: Complete.", 
+    bio: "Subject found with minor leg trauma in Mumbai Central. Fully rehabilitated.", 
     image: "https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?w=800", 
     phone: "919372079707", location: "Mumbai", liked: false, likesCount: 89, comments: [], status: "Active" 
-  },
-  { 
-    type: 'news', id: 2, headline: "Canine Distemper Outbreak: Sector 4 Alert", category: "MEDICAL ALERT",
-    image: "https://images.unsplash.com/photo-1576201836106-db1758fd1c97?w=1200", 
-    author: { name: "Ops Command", role: "Medical Unit", avatar: "OC" },
-    date: "JAN 28, 2026", readTime: "3 min read", status: "Critical",
-    content: "Viral pathogen detected in stray populations near North Sector. Immediate isolation protocols are in effect. Vaccination drives scheduled for 0800 hours tomorrow. \n\nAll units are requested to carry extra disinfectant and PPE. Do not approach symptomatic subjects without full protective gear. Report sightings immediately via the SOS module.",
-    location: "Sector 4", liked: false, likesCount: 215, comments: [], verified: true 
   },
 ];
 
@@ -159,7 +160,6 @@ const LEADERBOARD = [
   { name: "Alok Sharma", karma: 1100, rank: 3, badge: "Field Specialist", avatar: "AS" }
 ];
 
-// Utility
 const convertToBase64 = (file) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -180,36 +180,26 @@ const SafeImage = ({ src, className }) => {
   return <img src={src} className={className} alt="intel" onError={() => setErr(true)} loading="lazy" />;
 };
 
-// ==========================================
-// 4. MAIN APPLICATION CORE
-// ==========================================
-
 export default function App() {
   const [screen, setScreen] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('cs_screen') : 'auth') || 'auth');
   const [tab, setTab] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('cs_tab') : 'feed') || 'feed');
   const [user, setUser] = useState(() => (typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('cs_user')) : null) || null);
   const [karma, setKarma] = useState(() => (typeof window !== 'undefined' ? parseInt(localStorage.getItem('cs_karma')) : 50) || 50);
   const [feed, setFeed] = useState(() => (typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('cs_feed')) : INITIAL_FEED) || INITIAL_FEED);
-  
-  // FOLLOW SYSTEM STATE
   const [following, setFollowing] = useState(() => (typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('cs_following')) : []) || []);
-  const [followersCount] = useState(128); 
-
   const [liveData, setLiveData] = useState({ cruelty: 14829, hunger: 52044, rescued: 128956 });
   const [searchQuery, setSearchQuery] = useState('');
   const [authForm, setAuthForm] = useState({ email: '', password: '' });
   const [postForm, setPostForm] = useState({ title: '', desc: '', type: 'news', image: null, age: 'Junior' });
   const [filter, setFilter] = useState('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [commentInput, setCommentInput] = useState("");
-  
   const [notification, setNotification] = useState(null);
   const [sosLoading, setSosLoading] = useState(false);
 
   useEffect(() => {
-    // --- LEAFLET ICON FIX (MOVED INSIDE USEEFFECT FOR VERCEL) ---
+    // Leaflet Icon Fix inside useEffect
     delete L.Icon.Default.prototype._getIconUrl;
     L.Icon.Default.mergeOptions({
       iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
@@ -238,91 +228,38 @@ export default function App() {
     setTimeout(() => setNotification(null), 3000);
   };
 
-  const handleFollow = (authorName) => {
-    if (following.includes(authorName)) {
-        setFollowing(following.filter(name => name !== authorName));
-        setNotification(`Unfollowed Agent ${authorName}`);
-    } else {
-        setFollowing([...following, authorName]);
-        setNotification(`Now Following Agent ${authorName}`);
-    }
-    setTimeout(() => setNotification(null), 3000);
-  };
-
-  const handleShare = () => {
-    if (navigator.share) {
-        navigator.share({
-            title: selectedArticle.headline || selectedArticle.name,
-            text: "Check out this mission report from PAWsitive.",
-            url: window.location.href,
-        }).catch(console.error);
-    } else {
-        setNotification("Link copied to clipboard");
-        setTimeout(() => setNotification(null), 3000);
-    }
-  };
-
-  const handleComment = () => {
-    if (!commentInput.trim()) return;
-    const newComment = {
-        id: Date.now(),
-        text: commentInput,
-        author: user.name,
-        avatar: user.name.substring(0,2).toUpperCase(),
-        time: "Just now"
-    };
-    
-    const updatedFeed = feed.map(item => {
-        if (item.id === selectedArticle.id) {
-            const updatedItem = { ...item, comments: [...(item.comments || []), newComment] };
-            setSelectedArticle(updatedItem); 
-            return updatedItem;
-        }
-        return item;
-    });
-    setFeed(updatedFeed);
-    setCommentInput("");
-    addKarma(5);
-  };
-
   const handleSOS = () => {
     setSosLoading(true);
     navigator.geolocation.getCurrentPosition((pos) => {
-        const msg = `SOS ALERT | Agent: ${user?.name}\nDivision: ${user?.city}\nGPS: https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
+        const msg = `SOS ALERT | Agent: ${user?.name}\nGPS: https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
         window.open(`https://wa.me/+919820161114?text=${encodeURIComponent(msg)}`, '_blank');
         setSosLoading(false); addKarma(15);
       }, () => {
-        window.open(`https://wa.me/+919820161114?text=SOS ALERT: Manual Check-in from ${user?.city}`, '_blank');
+        window.open(`https://wa.me/+919820161114?text=SOS ALERT: Manual Check-in`, '_blank');
         setSosLoading(false);
     });
   };
 
   const handlePostSubmit = () => {
-    if(!postForm.title || !postForm.desc || !postForm.image) return alert("All fields mandatory.");
+    if(!postForm.title || !postForm.image) return alert("Required.");
     const newEntry = {
       id: Date.now(), 
       type: postForm.type,
       headline: postForm.type === 'news' ? postForm.title : null,
       name: postForm.type === 'adoption' ? postForm.title : null,
       image: postForm.image, 
-      author: { name: user.name, role: "Field Agent", avatar: user.name.substring(0,2).toUpperCase() },
+      author: { name: user.name, avatar: user.name.substring(0,2).toUpperCase() },
       date: "JUST NOW", 
-      readTime: "2 min read", 
       content: postForm.desc,
-      bio: postForm.type === 'adoption' ? postForm.desc : null,
-      age: postForm.type === 'adoption' ? postForm.age : null,
+      bio: postForm.desc,
+      age: postForm.age,
       liked: false, 
       comments: [], 
-      status: "Active", 
-      phone: "91+919820161114", 
-      category: "FIELD REPORT",
       location: user?.city || "Unknown"
     };
     setFeed([newEntry, ...feed]); 
     setIsModalOpen(false);
-    setPostForm({ title: '', desc: '', type: 'news', image: null, age: 'Junior' });
     addKarma(25);
-    if(newEntry.type === 'news') setSelectedArticle(newEntry);
   };
 
   const filteredFeed = useMemo(() => {
@@ -331,64 +268,43 @@ export default function App() {
       .filter(i => (i.headline || i.name || "").toLowerCase().includes(searchQuery.toLowerCase()));
   }, [feed, filter, searchQuery]);
 
-  // --- 🛡️ AUTH SCREEN ---
   if (screen === 'auth') return (
     <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center relative overflow-hidden">
+      <style>{styles}</style>
       <div className="absolute inset-0 z-0 opacity-40">
         <img src="https://images.unsplash.com/photo-1548199973-03cce0bbc87b?q=80&w=2000" className="w-full h-full object-cover" alt="bg" />
         <div className="absolute inset-0 bg-gradient-to-b from-slate-950 via-slate-950/20 to-slate-950"></div>
       </div>
-      <div className="w-full max-w-md space-y-12 animate-fade-in relative z-10">
-        <div className="space-y-6">
-            <div className="bg-emerald-500 w-24 h-24 rounded-[2.5rem] flex items-center justify-center mx-auto shadow-2xl animate-float border-4 border-white/10"><PawPrint className="text-white w-12 h-12" /></div>
-            <h1 className="text-5xl md:text-6xl font-black text-white tracking-tighter uppercase leading-none">PAWSITIVE<br/><span className="text-emerald-400">SCROLL</span></h1>
-        </div>
-        <div className="space-y-5 text-left">
-          <div className="space-y-2">
-            <label className="text-[10px] font-black text-emerald-400 uppercase tracking-widest ml-4">🛡️ Identity (Email)</label>
-            <input type="email" value={authForm.email} onChange={(e)=>setAuthForm({...authForm, email:e.target.value})} placeholder="agent@division.org" className="w-full p-6 bg-slate-950 border-2 border-slate-800 text-emerald-400 font-black rounded-[2rem] outline-none shadow-xl focus:border-emerald-500 transition-all" />
-          </div>
-          <div className="space-y-2">
-            <label className="text-[10px] font-black text-emerald-400 uppercase tracking-widest ml-4">🔑 Access Key (Password)</label>
-            <input type="password" value={authForm.password} onChange={(e)=>setAuthForm({...authForm, password:e.target.value})} placeholder="••••••••" className="w-full p-6 bg-slate-950 border-2 border-slate-800 text-emerald-400 font-black rounded-[2rem] outline-none shadow-xl focus:border-emerald-500 transition-all" />
-          </div>
-          <button onClick={() => { if(!authForm.email || !authForm.password) return alert("Required."); setScreen('setup'); }} className="w-full py-7 bg-emerald-500 text-white rounded-[2rem] font-black uppercase tracking-[0.3em] text-[11px] hover:bg-emerald-400 transition-all shadow-2xl active:scale-95">Initialize Session</button>
+      <div className="w-full max-w-md space-y-12 animate-fade-in relative z-10 font-black uppercase">
+        <div className="bg-emerald-500 w-24 h-24 rounded-[2.5rem] flex items-center justify-center mx-auto shadow-2xl animate-float border-4 border-white/10"><PawPrint className="text-white w-12 h-12" /></div>
+        <h1 className="text-5xl text-white tracking-tighter leading-none">PAWSITIVE<br/><span className="text-emerald-400">SCROLL</span></h1>
+        <div className="space-y-4">
+          <input type="email" value={authForm.email} onChange={(e)=>setAuthForm({...authForm, email:e.target.value})} placeholder="Identity (Email)" className="w-full p-6 bg-slate-950 border-2 border-slate-800 text-emerald-400 rounded-[2rem] outline-none shadow-xl" />
+          <input type="password" value={authForm.password} onChange={(e)=>setAuthForm({...authForm, password:e.target.value})} placeholder="Access Key" className="w-full p-6 bg-slate-950 border-2 border-slate-800 text-emerald-400 rounded-[2rem] outline-none shadow-xl" />
+          <button onClick={() => setScreen('setup')} className="w-full py-7 bg-emerald-500 text-white rounded-[2rem] font-black uppercase tracking-widest text-[11px] shadow-2xl active:scale-95">Initialize Session</button>
         </div>
       </div>
     </div>
   );
 
-  // --- 🛡️ SETUP SCREEN ---
   if (screen === 'setup') return (
-    <div className="min-h-screen bg-emerald-600 flex items-center justify-center p-4 md:p-6 overflow-hidden">
-      <div className="bg-white w-full max-w-6xl rounded-[2.5rem] md:rounded-[4rem] shadow-2xl animate-slide-up flex flex-col md:flex-row overflow-hidden min-h-[650px] border-4 md:border-8 border-white/20">
-        <div className="hidden md:block w-1/2 relative group">
-            <img src="https://images.unsplash.com/photo-1543852786-1cf6624b9987?q=80&w=2000" className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110" alt="setup" />
-            <div className="absolute inset-0 bg-emerald-950/40 mix-blend-multiply"></div>
-            <div className="absolute inset-0 flex items-center justify-center p-12">
-                <div className="p-10 border-4 border-white/40 rounded-[3rem] backdrop-blur-md animate-float">
-                    <p className="text-white text-5xl font-black uppercase tracking-tighter leading-none text-center">Identity<br/>Establishing.</p>
-                </div>
-            </div>
+    <div className="min-h-screen bg-emerald-600 flex items-center justify-center p-4">
+      <div className="bg-white w-full max-w-4xl rounded-[3rem] shadow-2xl flex flex-col md:flex-row overflow-hidden min-h-[500px]">
+        <div className="hidden md:block w-1/2 relative">
+            <img src="https://images.unsplash.com/photo-1543852786-1cf6624b9987?q=80&w=2000" className="w-full h-full object-cover" alt="setup" />
+            <div className="absolute inset-0 bg-emerald-950/40 backdrop-blur-sm"></div>
         </div>
-        <div className="w-full md:w-1/2 p-8 md:p-20 flex flex-col justify-center bg-white text-left">
-            <h2 className="text-4xl md:text-5xl font-black text-slate-950 uppercase tracking-tighter mb-4">Identity Setup</h2>
-            <p className="text-slate-400 font-medium mb-12 uppercase tracking-widest text-[10px] font-black">Assign your operational district callsign.</p>
+        <div className="w-full md:w-1/2 p-12 flex flex-col justify-center">
+            <h2 className="text-4xl font-black text-slate-950 uppercase tracking-tighter mb-8">Identity Setup</h2>
             <div className="space-y-6">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-400 tracking-widest ml-4 uppercase">🐕 Agent Callsign Name</label>
-                  <input id="s-name" placeholder="Agent Name" className="w-full p-7 bg-slate-950 text-emerald-400 font-black text-lg rounded-[2.5rem] outline-none border-2 border-transparent focus:border-emerald-500 transition-all shadow-xl" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-400 tracking-widest ml-4 uppercase">🌍 Division City</label>
-                  <input id="s-city" placeholder="Mumbai, Pune, Bangalore..." className="w-full p-7 bg-slate-950 text-emerald-400 font-black text-lg rounded-[2.5rem] outline-none border-2 border-transparent focus:border-emerald-500 transition-all shadow-xl" />
-                </div>
+                <input id="s-name" placeholder="Agent Callsign" className="w-full p-7 bg-slate-950 text-emerald-400 font-black rounded-[2rem] outline-none" />
+                <input id="s-city" placeholder="Division City" className="w-full p-7 bg-slate-950 text-emerald-400 font-black rounded-[2rem] outline-none" />
                 <button onClick={() => {
                     const n = document.getElementById('s-name').value;
                     const c = document.getElementById('s-city').value;
                     if(!n || !c) return alert("Required.");
                     setUser({name: n, city: c}); setScreen('app'); addKarma(50);
-                }} className="w-full py-8 bg-slate-950 text-white rounded-[2.5rem] font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-transform mt-6">Activate Profile</button>
+                }} className="w-full py-8 bg-slate-950 text-white rounded-[2.5rem] font-black uppercase tracking-widest shadow-xl active:scale-95">Activate Profile</button>
             </div>
         </div>
       </div>
@@ -396,127 +312,90 @@ export default function App() {
   );
 
   return (
-    <div className="min-h-screen bg-white font-sans pb-32 selection:bg-emerald-500 selection:text-white relative">
+    <div className="min-h-screen bg-white font-sans pb-32 relative">
       <style>{styles}</style>
 
       {notification && (
-        <div className="fixed top-8 left-1/2 -translate-x-1/2 z-[100] bg-slate-950 text-white px-6 md:px-10 py-4 md:py-5 rounded-full shadow-2xl animate-slide-up flex items-center gap-3 border border-emerald-500 w-max max-w-[90%]">
-          <Zap className="text-amber-400 w-4 md:w-5 h-4 md:h-5 fill-amber-400" />
-          <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest">{notification}</span>
+        <div className="fixed top-8 left-1/2 -translate-x-1/2 z-[100] bg-slate-950 text-white px-8 py-4 rounded-full shadow-2xl flex items-center gap-3 border border-emerald-500 font-black uppercase text-[10px] tracking-widest animate-slide-up">
+          <Zap className="text-amber-400 w-5 h-5 fill-amber-400" /> {notification}
         </div>
       )}
 
       {/* NAVBAR */}
-      <nav className="sticky top-0 z-40 bg-white/95 backdrop-blur-xl border-b border-slate-200 px-4 md:px-10 h-auto py-4 md:py-0 md:h-24 flex flex-col md:flex-row md:items-center justify-between shadow-sm gap-4">
-        
-        <div className="flex items-center justify-between w-full md:w-auto">
-          <div className="flex items-center gap-4 cursor-pointer" onClick={() => setTab('feed')}>
-            <div className="bg-slate-950 p-2 md:p-2.5 rounded-2xl shadow-lg hover:rotate-12 transition-transform"><PawPrint className="w-5 h-5 md:w-6 md:h-6 text-white" /></div>
-            <span className="font-black text-xl md:text-2xl tracking-tighter text-slate-900 uppercase">PAWSITIVE SCROLL</span>
-          </div>
-          
-          <div className="flex items-center gap-3 md:hidden">
-            <div className="bg-emerald-50 px-3 py-2 rounded-2xl border border-emerald-100 flex items-center gap-2">
-              <Zap className="w-4 h-4 text-emerald-600 fill-emerald-600" />
-              <span className="text-xs font-black text-emerald-700 uppercase">{karma}</span>
-            </div>
-            <button onClick={() => setIsModalOpen(true)} className="bg-slate-950 text-white p-2 rounded-xl shadow-xl active:scale-90 transition-transform"><Plus className="w-5 h-5" /></button>
-          </div>
+      <nav className="sticky top-0 z-40 bg-white/95 backdrop-blur-xl border-b border-slate-200 px-10 h-24 flex items-center justify-between shadow-sm">
+        <div className="flex items-center gap-4 cursor-pointer" onClick={() => setTab('feed')}>
+          <div className="bg-slate-950 p-2.5 rounded-2xl shadow-lg"><PawPrint className="w-6 h-6 text-white" /></div>
+          <span className="font-black text-2xl tracking-tighter text-slate-900 uppercase">PAWSITIVE SCROLL</span>
         </div>
 
-        <div className="w-full md:w-auto overflow-x-auto no-scrollbar pb-1 md:pb-0">
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-[2rem] border border-slate-200 w-max mx-auto md:mx-0">
-            {[
-              { id: 'feed', label: 'Feed 📰' },
-              { id: 'ops', label: 'Map 🚁' },
-              { id: 'ngos', label: 'Registry 🏥' },
-              { id: 'scanner', label: 'Scanner 🧬' },
-              { id: 'manual', label: 'Protocol 📜' },
-              { id: 'logistics', label: 'Supply 📦' },
-              { id: 'profile', label: 'Profile 💂' }
-            ].map(t => (
-              <button key={t.id} onClick={() => setTab(t.id)} className={`px-4 md:px-6 py-2 md:py-2.5 rounded-[1.5rem] text-[10px] md:text-xs font-extrabold uppercase tracking-wider transition-all whitespace-nowrap ${tab === t.id ? 'bg-white text-emerald-600 shadow-sm border border-slate-100 scale-[1.02]' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200/50'}`}>
-                {t.label}
-              </button>
-            ))}
-          </div>
+        <div className="hidden md:flex items-center gap-1 bg-slate-100 p-1 rounded-[2rem] border border-slate-200">
+          {[
+            { id: 'feed', label: 'Feed 📰' },
+            { id: 'ops', label: 'Map 🚁' },
+            { id: 'ngos', label: 'Registry 🏥' },
+            { id: 'scanner', label: 'Scanner 🧬' },
+            { id: 'manual', label: 'Protocol 📜' },
+            { id: 'logistics', label: 'Supply 📦' },
+            { id: 'profile', label: 'Profile 💂' }
+          ].map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)} className={`px-6 py-2.5 rounded-[1.5rem] text-xs font-extrabold uppercase tracking-wider transition-all ${tab === t.id ? 'bg-white text-emerald-600 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-900'}`}>
+              {t.label}
+            </button>
+          ))}
         </div>
 
-        <div className="hidden md:flex items-center gap-6">
+        <div className="flex items-center gap-6">
           <div className="bg-emerald-50 px-6 py-3 rounded-2xl border border-emerald-100 flex items-center gap-3">
             <Zap className="w-5 h-5 text-emerald-600 fill-emerald-600" />
-            <span className="text-sm font-black text-emerald-700 uppercase">{karma} <span className="text-[10px] opacity-40">Pts</span></span>
+            <span className="text-sm font-black text-emerald-700 uppercase">{karma}</span>
           </div>
-          <button onClick={() => setIsModalOpen(true)} className="bg-slate-950 text-white p-4 rounded-2xl shadow-xl hover:scale-110 transition-all active:scale-95"><Plus className="w-7 h-7" /></button>
+          <button onClick={() => setIsModalOpen(true)} className="bg-slate-950 text-white p-4 rounded-2xl shadow-xl hover:scale-110 active:scale-95 transition-all"><Plus className="w-7 h-7" /></button>
         </div>
       </nav>
 
-      {/* MAIN CONTENT AREA */}
-      <main className="max-w-7xl mx-auto px-4 md:px-10 py-6 md:py-12 text-slate-950">
+      {/* TABS */}
+      <main className="max-w-7xl mx-auto px-10 py-12 text-slate-950">
         
-        {/* FEED */}
         {tab === 'feed' && (
-          <div className="space-y-8 md:space-y-12 animate-fade-in">
-            <div className="bg-slate-950 p-3 md:p-4 rounded-2xl overflow-hidden relative border-y-4 border-emerald-500 shadow-2xl w-full max-w-full">
-                <div className="flex items-center gap-6 md:gap-12 whitespace-nowrap animate-ticker font-black text-[9px] md:text-[11px] text-white uppercase tracking-widest">
-                    <span className="flex items-center gap-2 md:gap-3"><Skull className="text-rose-500 w-3 h-3 md:w-4 md:h-4" /> Cruelty Cases: <span className="text-rose-500">{liveData.cruelty.toLocaleString()}</span></span>
-                    <span className="flex items-center gap-2 md:gap-3"><Flame className="text-orange-500 w-3 h-3 md:w-4 md:h-4" /> Hunger Alerts: <span className="text-orange-500">{liveData.hunger.toLocaleString()}</span></span>
-                    <span className="flex items-center gap-2 md:gap-3"><HandHeart className="text-emerald-500 w-3 h-3 md:w-4 md:h-4" /> Lives Saved: <span className="text-emerald-500">{liveData.rescued.toLocaleString()}</span></span>
+          <div className="space-y-12 animate-fade-in">
+            <div className="bg-slate-950 p-4 rounded-2xl overflow-hidden relative border-y-4 border-emerald-500 shadow-2xl">
+                <div className="animate-ticker font-black text-[11px] text-white uppercase tracking-widest gap-12 flex">
+                    <span><Skull className="inline text-rose-500 mr-2" /> Cruelty Cases: {liveData.cruelty.toLocaleString()}</span>
+                    <span><Flame className="inline text-orange-500 mr-2" /> Hunger Alerts: {liveData.hunger.toLocaleString()}</span>
+                    <span><HandHeart className="inline text-emerald-500 mr-2" /> Lives Saved: {liveData.rescued.toLocaleString()}</span>
+                    <span><Skull className="inline text-rose-500 mr-2" /> Cruelty Cases: {liveData.cruelty.toLocaleString()}</span>
+                    <span><Flame className="inline text-orange-500 mr-2" /> Hunger Alerts: {liveData.hunger.toLocaleString()}</span>
+                    <span><HandHeart className="inline text-emerald-500 mr-2" /> Lives Saved: {liveData.rescued.toLocaleString()}</span>
                 </div>
             </div>
 
-            <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 md:gap-8 border-l-4 md:border-l-8 border-emerald-500 pl-4 md:pl-8">
+            <header className="flex items-end justify-between border-l-8 border-emerald-500 pl-8 font-black uppercase">
                 <div>
-                  <h2 className="text-4xl md:text-7xl font-black text-slate-950 tracking-tighter uppercase leading-none">Mission Hub 📡</h2>
-                  <p className="text-slate-400 font-bold uppercase text-[9px] md:text-[11px] tracking-[0.4em] mt-2 md:mt-4 font-black">District Deployment: <span className="text-emerald-600">{user?.city} Command</span></p>
+                  <h2 className="text-7xl tracking-tighter leading-none">Mission Hub 📡</h2>
+                  <p className="text-slate-400 text-[11px] tracking-[0.4em] mt-4 font-black">District Deployment: <span className="text-emerald-600">{user?.city} Command</span></p>
                 </div>
-                <div className="flex flex-col gap-3 md:gap-4 w-full md:w-auto">
-                  <div className="relative w-full">
-                    <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300 w-4 h-4 md:w-5 md:h-5" />
-                    <input value={searchQuery} onChange={(e)=>setSearchQuery(e.target.value)} placeholder="SEARCH INTEL..." className="bg-slate-50 border-2 border-slate-100 rounded-2xl pl-12 md:pl-14 pr-6 md:pr-8 py-3 md:py-4 outline-none font-black text-[10px] md:text-[11px] text-slate-950 w-full md:w-80 shadow-inner focus:border-emerald-500 transition-colors" />
-                  </div>
-                  <div className="flex bg-white p-1 rounded-2xl shadow-sm border border-slate-200 font-black uppercase overflow-x-auto no-scrollbar">
-                      {['all', 'news', 'adoption'].map(f => (
-                          <button key={f} onClick={() => setFilter(f)} className={`flex-1 px-4 md:px-6 py-2 md:py-3 rounded-xl text-[9px] md:text-[10px] tracking-widest transition-all whitespace-nowrap ${filter === f ? 'bg-slate-950 text-white shadow-xl' : 'text-slate-400 hover:text-slate-900'}`}>{f === 'news' ? 'News 📢' : f === 'adoption' ? 'Adopt 🏠' : 'All 📂'}</button>
-                      ))}
-                  </div>
+                <div className="flex bg-white p-1 rounded-2xl shadow-sm border border-slate-200 font-black uppercase">
+                    {['all', 'news', 'adoption'].map(f => (
+                        <button key={f} onClick={() => setFilter(f)} className={`px-6 py-3 rounded-xl text-[10px] tracking-widest transition-all ${filter === f ? 'bg-slate-950 text-white shadow-xl' : 'text-slate-400 hover:text-slate-900'}`}>{f}</button>
+                    ))}
                 </div>
             </header>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-12">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12 font-black uppercase">
               {filteredFeed.map(item => (
-                <div key={item.id} className="bg-white rounded-[2rem] md:rounded-[3rem] border border-slate-200 overflow-hidden hover:shadow-2xl hover:-translate-y-2 transition-all group flex flex-col h-full border-b-8 border-slate-100">
-                  <div className="h-56 md:h-72 relative overflow-hidden" onClick={() => item.type === 'news' ? setSelectedArticle(item) : null}>
-                    <SafeImage src={item.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000 cursor-pointer" />
-                    <div className="absolute top-6 left-6 md:top-8 md:left-8">
-                        <span className={`px-3 md:px-4 py-1.5 rounded-lg text-[9px] md:text-[10px] font-black uppercase tracking-widest text-white shadow-xl ${item.type === 'news' ? 'bg-emerald-500' : 'bg-blue-600'}`}>{item.type === 'news' ? 'INTEL 📢' : 'RESCUE 🐾'}</span>
+                <div key={item.id} className="bg-white rounded-[3rem] border border-slate-200 overflow-hidden hover:shadow-2xl hover:-translate-y-2 transition-all group flex flex-col h-full border-b-8 border-slate-100">
+                  <div className="h-72 relative overflow-hidden" onClick={() => item.type === 'news' && setSelectedArticle(item)}>
+                    <SafeImage src={item.image} className="w-full h-full object-cover cursor-pointer" />
+                    <div className="absolute top-8 left-8">
+                        <span className={`px-4 py-1.5 rounded-lg text-[10px] text-white ${item.type === 'news' ? 'bg-emerald-500' : 'bg-blue-600'}`}>{item.type}</span>
                     </div>
                   </div>
-                  <div className="p-6 md:p-10 flex flex-col flex-1 font-black uppercase">
-                    {item.type === 'news' ? (
-                      <>
-                        <div className="flex items-center gap-2 text-[8px] md:text-[9px] text-slate-400 tracking-widest mb-3 md:mb-4">
-                            <Clock className="w-3 h-3" /> {item.date} • {item.location}
-                        </div>
-                        <h3 className="text-2xl md:text-3xl tracking-tight leading-tight mb-6 md:mb-8 line-clamp-2 hover:text-emerald-600 cursor-pointer" onClick={() => setSelectedArticle(item)}>{item.headline}</h3>
-                        <div className="mt-auto flex items-center justify-between pt-6 md:pt-8 border-t border-slate-100">
-                          <button onClick={() => setSelectedArticle(item)} className="text-[10px] md:text-[11px] tracking-widest text-emerald-600 flex items-center gap-2 hover:gap-4 transition-all underline decoration-4 underline-offset-8">Read Full Report</button>
-                          <div className="flex gap-4">
-                            <Heart onClick={() => { item.liked = !item.liked; setFeed([...feed]); addKarma(5); }} className={`w-5 h-5 md:w-6 md:h-6 cursor-pointer hover:scale-110 transition-transform ${item.liked ? 'fill-rose-500 text-rose-500' : 'text-slate-200'}`} />
-                            <MessageCircle className="w-5 h-5 md:w-6 md:h-6 text-slate-200 cursor-pointer hover:text-blue-500 hover:scale-110 transition-transform" />
-                          </div>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="flex justify-between items-start mb-4 md:mb-6">
-                          <h3 className="text-2xl md:text-3xl tracking-tighter leading-none">{item.name}</h3>
-                          <span className="bg-blue-50 text-blue-600 px-3 md:px-4 py-1.5 rounded-xl text-[9px] md:text-[10px]">{item.age}</span>
-                        </div>
-                        <p className="text-slate-500 text-xs md:text-sm font-medium mb-8 md:mb-10 normal-case italic leading-relaxed">"{item.bio}"</p>
-                        <button onClick={() => window.open(`https://wa.me/${item.phone}`)} className="mt-auto w-full bg-slate-950 text-white py-4 md:py-5 rounded-[2rem] tracking-[0.2em] text-[9px] md:text-[10px] shadow-xl hover:bg-black transition-all active:scale-95">Submit Query</button>
-                      </>
-                    )}
+                  <div className="p-10 flex flex-col flex-1">
+                    <h3 className="text-3xl tracking-tight leading-tight mb-8 line-clamp-2 cursor-pointer" onClick={() => setSelectedArticle(item)}>{item.headline || item.name}</h3>
+                    <p className="text-slate-500 text-sm font-medium mb-10 normal-case italic line-clamp-3 leading-relaxed">"{item.bio || item.content}"</p>
+                    <button onClick={() => item.type === 'news' ? setSelectedArticle(item) : window.open(`https://wa.me/${item.phone}`)} className="mt-auto w-full bg-slate-950 text-white py-5 rounded-[2rem] tracking-[0.2em] text-[10px] hover:bg-black transition-all shadow-xl">
+                      {item.type === 'news' ? 'Read Full Report' : 'Submit Query'}
+                    </button>
                   </div>
                 </div>
               ))}
@@ -524,31 +403,18 @@ export default function App() {
           </div>
         )}
 
-        {/* OPS MAP */}
         {tab === 'ops' && (
-          <div className="space-y-6 md:space-y-8 animate-fade-in h-[calc(100vh-220px)] md:h-[calc(100vh-200px)] flex flex-col">
-            <header className="flex flex-col md:flex-row md:items-end justify-between px-2 md:px-4 gap-4">
-              <div>
-                <h2 className="text-4xl md:text-6xl font-black text-slate-950 tracking-tighter uppercase leading-none">Sector Grid 🚁</h2>
-                <p className="text-slate-400 font-bold uppercase text-[9px] md:text-[11px] tracking-[0.4em] mt-2">Live Satellite Feed</p>
+          <div className="space-y-8 animate-fade-in h-[calc(100vh-200px)] flex flex-col font-black uppercase">
+            <h2 className="text-6xl tracking-tighter">Sector Grid 🚁</h2>
+            <div className="flex-1 rounded-[3rem] overflow-hidden shadow-2xl border-[8px] border-white relative z-0">
+              <div className="absolute inset-0 pointer-events-none z-[400] opacity-30">
+                 <div className="w-full h-full animate-scan shadow-[0_0_20px_4px_#10b981]"></div>
               </div>
-            </header>
-
-            <div className="flex-1 rounded-[2rem] md:rounded-[3rem] overflow-hidden shadow-2xl border-[4px] md:border-[8px] border-white relative z-0">
-              <div className="absolute inset-0 pointer-events-none z-[400] overflow-hidden opacity-30">
-                 <div className="w-full h-full bg-transparent animate-scan shadow-[0_0_20px_4px_#10b981]"></div>
-              </div>
-
-              <MapContainer center={[19.0760, 72.8777]} zoom={12} style={{ height: '100%', width: '100%', background: '#e2e8f0' }} zoomControl={false}>
+              <MapContainer center={[19.0760, 72.8777]} zoom={12} style={{ height: '100%', width: '100%' }} zoomControl={false}>
                 <TileLayer attribution='&copy; CARTO' url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
                 {ACTIVE_CASES.map((c) => (
                     <Marker key={c.id} position={[c.lat, c.lng]} icon={getTacticalIcon(c.severity, c.title)}>
-                        <Popup className="tactical-popup">
-                            <div className="font-sans text-slate-900 p-2">
-                                <h3 className="font-black uppercase text-sm mb-1">{c.title}</h3>
-                                <p className={`text-xs font-bold uppercase ${c.severity === 'Critical' ? 'text-rose-600' : 'text-amber-600'}`}>{c.type} • {c.distance}</p>
-                            </div>
-                        </Popup>
+                        <Popup><div className="font-black uppercase text-sm">{c.title}<br/><span className="text-[10px] text-slate-400">{c.severity}</span></div></Popup>
                     </Marker>
                 ))}
               </MapContainer>
@@ -556,23 +422,19 @@ export default function App() {
           </div>
         )}
 
-        {/* NGO REGISTRY */}
+        {tab === 'scanner' && <ScannerView onScanComplete={addKarma} />}
+
         {tab === 'ngos' && (
-          <div className="space-y-8 md:space-y-12 animate-fade-in font-black uppercase">
-             <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-l-4 md:border-l-8 border-blue-500 pl-4 md:pl-8">
-                <div>
-                  <h2 className="text-4xl md:text-6xl font-black text-slate-950 tracking-tighter uppercase leading-none">NGO Registry 🏥</h2>
-                  <p className="text-slate-400 font-bold uppercase text-[9px] md:text-[11px] tracking-[0.4em] mt-2 md:mt-4">Authorized Units</p>
-                </div>
-             </header>
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-10">
+          <div className="space-y-12 animate-fade-in font-black uppercase">
+             <h2 className="text-6xl tracking-tighter border-l-8 border-blue-500 pl-8">NGO Registry 🏥</h2>
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                 {NGO_DATABASE.map(ngo => (
-                    <div key={ngo.id} className="bg-white p-6 md:p-10 rounded-[2.5rem] md:rounded-[4rem] border border-slate-200 flex flex-col md:flex-row items-center gap-6 md:gap-10 shadow-sm hover:border-blue-500 transition-all group">
-                        <SafeImage src={ngo.image} className="w-32 h-32 md:w-40 md:h-40 rounded-[2rem] md:rounded-[2.5rem] object-cover shadow-2xl" />
-                        <div className="flex-1 w-full text-center md:text-left">
-                            <h4 className="text-2xl md:text-3xl text-slate-950 tracking-tight leading-none mb-2">{ngo.name}</h4>
-                            <p className="text-[9px] md:text-[11px] text-slate-400 tracking-widest mb-4 md:mb-6">{ngo.city} Division</p>
-                            <button onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${ngo.gps}`)} className="w-full md:w-auto bg-slate-950 text-white px-8 py-4 rounded-2xl font-black text-[10px] tracking-widest flex items-center justify-center gap-2"><Navigation className="w-4 h-4" /> Start Nav</button>
+                    <div key={ngo.id} className="bg-white p-10 rounded-[4rem] border border-slate-200 flex items-center gap-10 shadow-sm hover:border-blue-500 transition-all">
+                        <SafeImage src={ngo.image} className="w-40 h-40 rounded-[2.5rem] object-cover shadow-2xl" />
+                        <div>
+                            <h4 className="text-3xl tracking-tight leading-none mb-2">{ngo.name}</h4>
+                            <p className="text-[11px] text-slate-400 tracking-widest mb-6">{ngo.city} Division</p>
+                            <button onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${ngo.gps}`)} className="bg-slate-950 text-white px-8 py-4 rounded-2xl font-black text-[10px] tracking-widest flex items-center gap-2 shadow-lg"><Navigation className="w-4 h-4" /> Start Nav</button>
                         </div>
                     </div>
                 ))}
@@ -580,105 +442,62 @@ export default function App() {
           </div>
         )}
 
-        {/* SCANNER */}
-        {tab === 'scanner' && <div className="max-w-4xl mx-auto py-6 md:py-12 animate-slide-up"><ScannerView onScanComplete={addKarma} /></div>}
-
-        {/* PROTOCOL */}
         {tab === 'manual' && (
-          <div className="max-w-6xl mx-auto space-y-12 md:space-y-20 animate-fade-in font-black uppercase">
-             <header className="text-center space-y-4">
-                <h2 className="text-4xl md:text-7xl font-black text-amber-900 tracking-tighter leading-none">Operational Protocol 📖</h2>
-             </header>
+          <div className="space-y-20 animate-fade-in font-black uppercase text-center">
+             <h2 className="text-7xl text-amber-900 tracking-tighter leading-none">Operational Protocol 📖</h2>
              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 {APP_PROTOCOLS.map(prot => (
-                    <div key={prot.id} className="bg-white p-6 md:p-8 rounded-[2rem] md:rounded-[2.5rem] border border-stone-200 shadow-sm hover:border-emerald-600 transition-all flex flex-col items-center text-center h-full">
+                    <div key={prot.id} className="bg-white p-8 rounded-[2.5rem] border border-stone-200 shadow-sm flex flex-col items-center">
                         <div className="bg-stone-50 p-4 rounded-[1.5rem] mb-4">{prot.icon}</div>
-                        <h4 className="text-lg md:text-xl font-black text-amber-900 uppercase mb-2">{prot.title}</h4>
-                        <p className="text-stone-500 leading-relaxed font-bold text-xs md:text-sm normal-case">{prot.desc}</p>
+                        <h4 className="text-xl text-amber-900 mb-2">{prot.title}</h4>
+                        <p className="text-stone-500 font-bold text-xs normal-case leading-relaxed">{prot.desc}</p>
                     </div>
                 ))}
              </div>
           </div>
         )}
 
-        {/* LOGISTICS */}
         {tab === 'logistics' && (
-        <div className="space-y-8 md:space-y-12 animate-fade-in font-black uppercase">
-            <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 border-l-4 md:border-l-8 border-amber-500 pl-4 md:pl-8">
-            <div>
-                <h2 className="text-4xl md:text-7xl font-black text-slate-950 tracking-tighter uppercase leading-none">Supply Lines 📦</h2>
-            </div>
-            </header>
-
-            <div className="grid grid-cols-1 gap-6 md:gap-8">
-            {SUPPLY_DROPS.map(drop => {
-                const percent = Math.min(100, Math.round((drop.raised / drop.goal) * 100));
-                return (
-                <div key={drop.id} className="bg-white p-6 md:p-10 rounded-[2.5rem] md:rounded-[4rem] border border-slate-200 shadow-xl relative overflow-hidden">
-                    <div className="absolute left-0 bottom-0 h-2 bg-slate-100 w-full">
-                        <div className="h-full bg-amber-400 transition-all duration-1000" style={{ width: `${percent}%` }}></div>
-                    </div>
-                    <div className="flex flex-col md:flex-row gap-6 md:gap-10 items-center">
-                        <SafeImage src={drop.image} className="w-full md:w-32 h-40 md:h-32 rounded-[2rem] object-cover" />
-                        <div className="flex-1 w-full space-y-4">
-                            <h4 className="text-2xl md:text-3xl text-slate-950 tracking-tight leading-none">{drop.title}</h4>
-                            <p className="text-[9px] md:text-[10px] text-slate-400 tracking-widest">{drop.sector}</p>
-                            <div className="h-5 md:h-6 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-200">
-                                <div className="h-full bg-amber-500 flex items-center justify-center text-[8px] md:text-[9px] text-white" style={{ width: `${percent}%` }}>{percent}%</div>
+            <div className="space-y-12 animate-fade-in font-black uppercase">
+                <h2 className="text-7xl tracking-tighter border-l-8 border-amber-500 pl-8">Supply Lines 📦</h2>
+                {SUPPLY_DROPS.map(drop => (
+                    <div key={drop.id} className="bg-white p-10 rounded-[4rem] border border-slate-200 shadow-xl flex items-center gap-10">
+                        <SafeImage src={drop.image} className="w-32 h-32 rounded-[2rem] object-cover" />
+                        <div className="flex-1 space-y-4">
+                            <h4 className="text-3xl text-slate-950 tracking-tight leading-none">{drop.title}</h4>
+                            <div className="h-6 w-full bg-slate-100 rounded-full overflow-hidden border">
+                                <div className="h-full bg-amber-500" style={{ width: `${(drop.raised/drop.goal)*100}%` }}></div>
                             </div>
                         </div>
-                        <button onClick={() => { addKarma(100); alert("Payment Gateway Simulated"); }} className="w-full md:w-auto bg-slate-950 text-white px-8 md:px-10 py-5 md:py-6 rounded-[2.5rem] tracking-[0.2em] text-[10px] hover:bg-amber-500 transition-all flex items-center justify-center gap-3">
-                            <Package className="w-4 h-4" /> Deploy Funds
-                        </button>
+                        <button onClick={() => addKarma(100)} className="bg-slate-950 text-white px-10 py-6 rounded-[2.5rem] tracking-[0.2em] text-[10px] hover:bg-amber-500 transition-all">Deploy Funds</button>
                     </div>
-                </div>
-                );
-            })}
+                ))}
             </div>
-        </div>
         )}
 
-        {/* PROFILE */}
         {tab === 'profile' && (
-            <div className="max-w-5xl mx-auto space-y-12 md:space-y-20 animate-fade-in">
-                <div className="bg-white p-8 md:p-16 rounded-[3rem] md:rounded-[5rem] border border-slate-200 shadow-2xl flex flex-col md:flex-row items-center gap-8 md:gap-16 text-center md:text-left">
-                    <div className="w-40 h-40 md:w-56 md:h-56 bg-slate-100 rounded-[3rem] md:rounded-[4rem] flex items-center justify-center text-slate-300"><User className="w-16 h-16 md:w-24 md:h-24" /></div>
-                    <div className="flex-1 space-y-4 md:space-y-6 font-black uppercase">
-                        <h2 className="text-4xl md:text-7xl font-black text-slate-950 tracking-tighter leading-none">{user?.name}</h2>
-                        <p className="text-slate-400 font-bold uppercase text-[9px] md:text-[11px] tracking-[0.4em] flex items-center justify-center md:justify-start gap-3"><MapPin className="text-rose-500 w-4 h-4 md:w-5 md:h-5" /> {user?.city} Division</p>
-                        
-                        <div className="flex justify-center md:justify-start gap-8 border-t border-b border-slate-100 py-6 my-4">
-                            <div>
-                                <p className="text-3xl font-black text-slate-900">128</p>
-                                <p className="text-[9px] font-bold text-slate-400 tracking-widest uppercase">Followers</p>
-                            </div>
-                            <div>
-                                <p className="text-3xl font-black text-slate-900">{following.length}</p>
-                                <p className="text-[9px] font-bold text-slate-400 tracking-widest uppercase">Following</p>
-                            </div>
-                        </div>
-
-                        <div className="flex flex-col md:flex-row gap-4 md:gap-6 pt-4">
-                            <div className="bg-slate-950 text-white px-8 md:px-12 py-4 md:py-6 rounded-3xl flex items-center justify-center gap-3 md:gap-5 shadow-2xl">
-                                <Zap className="text-amber-400 w-6 h-6 md:w-8 md:h-8 fill-amber-400" />
-                                <span className="text-lg md:text-xl tracking-widest">{karma} Impact Pts</span>
-                            </div>
-                            <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="p-4 md:p-6 bg-rose-50 text-rose-600 rounded-3xl border border-rose-100 hover:bg-rose-100 flex justify-center"><LogOut className="w-6 h-6 md:w-8 md:h-8"/></button>
+            <div className="max-w-5xl mx-auto space-y-20 animate-fade-in font-black uppercase">
+                <div className="bg-white p-16 rounded-[5rem] border border-slate-200 shadow-2xl flex items-center gap-16 relative overflow-hidden">
+                    <div className="w-56 h-56 bg-slate-100 rounded-[4rem] flex items-center justify-center text-slate-300"><User className="w-24 h-24" /></div>
+                    <div className="flex-1 space-y-6">
+                        <h2 className="text-7xl tracking-tighter leading-none">{user?.name}</h2>
+                        <div className="bg-slate-950 text-white px-12 py-6 rounded-3xl inline-flex items-center gap-5 shadow-2xl">
+                            <Zap className="text-amber-400 w-8 h-8 fill-amber-400" />
+                            <span className="text-xl tracking-widest">{karma} Impact Pts</span>
                         </div>
                     </div>
+                    <button onClick={() => {localStorage.clear(); window.location.reload();}} className="p-6 bg-rose-50 text-rose-600 rounded-3xl border border-rose-100 hover:bg-rose-100 transition-colors"><LogOut className="w-8 h-8"/></button>
                 </div>
-
-                <div className="space-y-8 md:space-y-12 font-black uppercase">
-                    <h3 className="text-3xl md:text-5xl font-black text-slate-950 tracking-tighter px-4 md:px-10 flex items-center gap-4 md:gap-6"><Crown className="text-amber-500 w-8 h-8 md:w-12 md:h-12"/> Regional Elite 🏆</h3>
-                    <div className="space-y-4 md:space-y-6 px-0 md:px-10">
+                <div className="space-y-12">
+                    <h3 className="text-5xl tracking-tighter px-10 flex items-center gap-6"><Crown className="text-amber-500 w-12 h-12"/> Regional Elite 🏆</h3>
+                    <div className="space-y-6 px-10">
                         {LEADERBOARD.map((l, i) => (
-                            <div key={i} className="bg-white p-6 md:p-12 rounded-[2.5rem] md:rounded-[4rem] border border-slate-200 flex items-center justify-between shadow-sm group hover:translate-x-4 transition-all">
-                                <div className="flex items-center gap-4 md:gap-12">
-                                    <div className="text-4xl md:text-6xl font-black text-slate-100 w-12 md:w-20">0{l.rank}</div>
-                                    <div className="w-12 h-12 md:w-20 md:h-20 bg-slate-100 rounded-2xl md:rounded-3xl flex items-center justify-center text-slate-400 text-lg md:text-2xl shadow-inner">{l.avatar}</div>
-                                    <h4 className="text-xl md:text-4xl text-slate-950 tracking-tighter">{l.name}</h4>
+                            <div key={i} className="bg-white p-12 rounded-[4rem] border border-slate-200 flex items-center justify-between shadow-sm hover:translate-x-4 transition-all">
+                                <div className="flex items-center gap-12">
+                                    <div className="text-6xl text-slate-100 w-20">0{l.rank}</div>
+                                    <h4 className="text-4xl tracking-tighter">{l.name}</h4>
                                 </div>
-                                <p className="text-2xl md:text-5xl text-slate-950">{l.karma.toLocaleString()}</p>
+                                <p className="text-5xl">{l.karma.toLocaleString()}</p>
                             </div>
                         ))}
                     </div>
@@ -687,86 +506,34 @@ export default function App() {
         )}
       </main>
 
-      {/* SOS BUTTON */}
+      {/* SOS */}
       <button 
         onClick={handleSOS}
-        className={`fixed bottom-12 right-6 md:right-12 z-50 w-20 h-20 md:w-28 md:h-28 rounded-full md:rounded-[3.5rem] flex flex-col items-center justify-center text-white shadow-2xl transition-all ${sosLoading ? 'bg-slate-900 animate-spin' : 'bg-rose-600 hover:scale-110 active:scale-95 animate-breathe'}`}
+        className={`fixed bottom-12 right-12 z-50 w-28 h-28 rounded-[3.5rem] flex flex-col items-center justify-center text-white shadow-2xl transition-all ${sosLoading ? 'bg-slate-900 animate-spin' : 'bg-rose-600 animate-breathe hover:scale-110'}`}
       >
-        <Siren className="w-8 h-8 md:w-12 md:h-12" />
-        <span className="text-[8px] md:text-[10px] font-black tracking-widest mt-1 md:mt-2 uppercase">SOS</span>
+        <Siren className="w-12 h-12" />
+        <span className="text-[10px] font-black tracking-widest mt-2 uppercase">SOS</span>
       </button>
 
       {/* ARTICLE VIEW */}
       {selectedArticle && (
-        <div className="fixed inset-0 z-[200] bg-white overflow-y-auto animate-fade-in no-scrollbar">
-          <div className="relative h-72 md:h-[50vh] w-full">
+        <div className="fixed inset-0 z-[200] bg-white overflow-y-auto animate-fade-in no-scrollbar font-black uppercase">
+          <div className="relative h-[50vh] w-full">
             <img src={selectedArticle.image} className="w-full h-full object-cover" alt="hero" />
             <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 to-transparent"></div>
-            <div className="absolute top-0 left-0 w-full p-6 flex justify-between items-center text-white">
-                <button onClick={() => setSelectedArticle(null)} className="p-3 bg-black/30 backdrop-blur-md rounded-full"><ChevronLeft className="w-6 h-6" /></button>
-                <div className="flex gap-3">
-                    <button onClick={handleShare} className="p-3 bg-black/30 backdrop-blur-md rounded-full"><Share className="w-5 h-5" /></button>
-                    <button className="p-3 bg-black/30 backdrop-blur-md rounded-full"><Bookmark className="w-5 h-5" /></button>
-                </div>
-            </div>
-            <div className="absolute bottom-0 left-0 w-full p-6 md:p-12 text-white">
-                <div className="max-w-4xl mx-auto">
-                    <span className="bg-emerald-500 text-white px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest mb-4 inline-block shadow-lg">
-                        {selectedArticle.category || "FIELD REPORT"}
-                    </span>
-                    <h1 className="text-3xl md:text-6xl font-black uppercase tracking-tighter leading-none mb-4 drop-shadow-lg">
-                        {selectedArticle.headline || selectedArticle.name}
-                    </h1>
-                </div>
+            <button onClick={() => setSelectedArticle(null)} className="absolute top-10 left-10 p-4 bg-black/30 backdrop-blur-md rounded-full text-white hover:bg-black/50 transition-all"><ChevronLeft /></button>
+            <div className="absolute bottom-12 left-12 text-white max-w-4xl">
+                <span className="bg-emerald-500 px-4 py-1.5 rounded-lg text-[10px] mb-6 inline-block shadow-lg">{selectedArticle.category || "FIELD REPORT"}</span>
+                <h1 className="text-6xl tracking-tighter leading-none mb-4 drop-shadow-lg">{selectedArticle.headline || selectedArticle.name}</h1>
             </div>
           </div>
-
-          <div className="max-w-3xl mx-auto p-6 md:p-12 pb-32">
-             <div className="flex items-center justify-between border-b border-slate-100 pb-8 mb-8">
-                <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-slate-900 rounded-full flex items-center justify-center text-white font-black shadow-lg">
-                        {selectedArticle.author?.avatar || "HQ"}
-                    </div>
-                    <div>
-                        <p className="text-sm font-black uppercase text-slate-900">{selectedArticle.author?.name || "Command Center"}</p>
-                    </div>
-                </div>
-                <button 
-                    onClick={() => handleFollow(selectedArticle.author?.name || "Command Center")}
-                    className={`px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest ${following.includes(selectedArticle.author?.name) ? 'bg-emerald-500 text-white' : 'bg-slate-100'}`}
-                >
-                    {following.includes(selectedArticle.author?.name) ? "Following" : "Follow Agent"}
-                </button>
-             </div>
-
-             <div className="prose prose-lg prose-slate max-w-none">
-                <p className="text-xl font-bold text-slate-900 leading-relaxed mb-8">
-                    {selectedArticle.content || selectedArticle.bio || "No intelligence data provided."}
-                </p>
-             </div>
-
-             {/* COMMENTS */}
-             <div className="mt-16 pt-8 border-t border-slate-200">
-                <h4 className="text-xl font-black uppercase text-slate-900 mb-6 flex items-center gap-2"><MessageCircle className="w-5 h-5"/> Intel Chatter ({selectedArticle.comments?.length || 0})</h4>
-                <div className="space-y-6 mb-8">
-                    {selectedArticle.comments && selectedArticle.comments.map((comment) => (
-                        <div key={comment.id} className="flex gap-4">
-                            <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-xs font-black text-slate-400">{comment.avatar}</div>
-                            <div className="bg-slate-50 p-4 rounded-2xl flex-1">
-                                <p className="text-[10px] font-black uppercase text-slate-900 mb-1">{comment.author}</p>
-                                <p className="text-sm font-medium text-slate-600">{comment.text}</p>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-                <div className="flex gap-3">
-                    <input 
-                        value={commentInput} 
-                        onChange={(e) => setCommentInput(e.target.value)}
-                        placeholder="Add update..." 
-                        className="flex-1 bg-slate-100 p-4 rounded-2xl outline-none font-medium text-sm"
-                    />
-                    <button onClick={handleComment} className="bg-slate-900 text-white p-4 rounded-2xl"><Send className="w-5 h-5" /></button>
+          <div className="max-w-3xl mx-auto p-12 pb-32">
+             <p className="text-xl font-bold text-slate-900 leading-relaxed mb-12 normal-case">{selectedArticle.content || selectedArticle.bio}</p>
+             <div className="border-t pt-12">
+                <h4 className="text-xl mb-8 flex items-center gap-3"><MessageCircle className="w-6 h-6"/> Intel Chatter</h4>
+                <div className="flex gap-4">
+                    <input value={commentInput} onChange={(e)=>setCommentInput(e.target.value)} placeholder="Submit update..." className="flex-1 bg-slate-100 p-6 rounded-2xl outline-none font-black" />
+                    <button onClick={() => { if(!commentInput) return; addKarma(5); setCommentInput(""); }} className="bg-slate-950 text-white p-6 rounded-2xl shadow-xl active:scale-95"><Send /></button>
                 </div>
              </div>
           </div>
@@ -775,40 +542,32 @@ export default function App() {
 
       {/* POST MODAL */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-[110] bg-slate-950/95 backdrop-blur-xl flex items-center justify-center p-4 md:p-6 animate-fade-in text-slate-950 font-black uppercase">
-          <div className="bg-white w-full max-w-3xl rounded-[3rem] md:rounded-[5rem] p-6 md:p-16 shadow-2xl relative max-h-[90vh] overflow-y-auto no-scrollbar border-[8px] md:border-[16px] border-white">
-            <div className="flex justify-between items-center mb-6 md:mb-12">
-              <h2 className="text-3xl md:text-5xl font-black uppercase tracking-tighter leading-none">File Report 📂</h2>
-              <button onClick={() => setIsModalOpen(false)} className="p-3 md:p-4 hover:bg-slate-100 rounded-3xl"><X className="w-6 h-6 md:w-8 md:h-8" /></button>
+        <div className="fixed inset-0 z-[110] bg-slate-950/95 backdrop-blur-xl flex items-center justify-center p-6 animate-fade-in font-black uppercase">
+          <div className="bg-white w-full max-w-3xl rounded-[5rem] p-16 shadow-2xl relative max-h-[90vh] overflow-y-auto no-scrollbar border-[16px] border-white text-slate-950">
+            <div className="flex justify-between items-center mb-12">
+              <h2 className="text-5xl tracking-tighter leading-none">File Report 📂</h2>
+              <button onClick={() => setIsModalOpen(false)} className="p-4 hover:bg-slate-100 rounded-3xl transition-all"><X className="w-8 h-8" /></button>
             </div>
-            
-            <div className="space-y-8 md:space-y-12">
-              <div className="h-48 md:h-80 bg-slate-950 border-4 border-dashed border-slate-800 rounded-[2.5rem] flex flex-col items-center justify-center relative overflow-hidden">
+            <div className="space-y-12">
+              <div className="h-80 bg-slate-950 border-4 border-dashed border-slate-800 rounded-[2.5rem] flex flex-col items-center justify-center relative group overflow-hidden">
                 {postForm.image ? (
                   <img src={postForm.image} className="w-full h-full object-cover" alt="preview" />
                 ) : (
-                  <>
-                    <ImageIcon className="text-emerald-500/20 w-16 h-16" />
-                    <p className="text-[9px] font-black uppercase text-emerald-500/40 mt-4 tracking-[0.5em]">Capture Visual Metadata</p>
-                  </>
+                  <div className="text-center">
+                    <ImageIcon className="text-emerald-500/20 w-16 h-16 mx-auto mb-4 group-hover:scale-110 transition-transform" />
+                    <p className="text-[10px] text-emerald-500/40 tracking-[0.5em]">Capture Metadata</p>
+                  </div>
                 )}
                 <input type="file" onChange={async (e) => {
                     const b64 = await convertToBase64(e.target.files[0]);
                     setPostForm({...postForm, image: b64});
                 }} className="absolute inset-0 opacity-0 cursor-pointer" />
               </div>
-
-              <div className="flex gap-4 p-2 bg-slate-100 rounded-[2rem]">
-                  <button onClick={() => setPostForm({...postForm, type: 'news'})} className={`flex-1 py-4 rounded-[2rem] text-[9px] tracking-widest ${postForm.type === 'news' ? 'bg-emerald-500 text-white shadow-xl' : 'text-slate-400'}`}>Mission News 📢</button>
-                  <button onClick={() => setPostForm({...postForm, type: 'adoption'})} className={`flex-1 py-4 rounded-[2rem] text-[9px] tracking-widest ${postForm.type === 'adoption' ? 'bg-blue-600 text-white shadow-xl' : 'text-slate-400'}`}>Adoption Task 🐶</button>
-              </div>
-
               <div className="space-y-6">
-                <input value={postForm.title} onChange={(e) => setPostForm({...postForm, title: e.target.value})} placeholder="Title" className="w-full p-6 bg-slate-950 text-emerald-400 border-4 border-slate-800 rounded-[2.5rem] outline-none" />
-                <textarea value={postForm.desc} onChange={(e) => setPostForm({...postForm, desc: e.target.value})} rows="5" placeholder="Description..." className="w-full p-6 bg-slate-950 text-emerald-400 border-4 border-slate-800 rounded-[2.5rem] outline-none" />
+                <input value={postForm.title} onChange={(e) => setPostForm({...postForm, title: e.target.value})} placeholder="Title / Name" className="w-full p-6 bg-slate-950 text-emerald-400 rounded-[2.5rem] outline-none shadow-xl" />
+                <textarea value={postForm.desc} onChange={(e) => setPostForm({...postForm, desc: e.target.value})} rows="4" placeholder="Description..." className="w-full p-6 bg-slate-950 text-emerald-400 rounded-[2.5rem] outline-none shadow-xl" />
               </div>
-
-              <button onClick={handlePostSubmit} className="w-full py-8 bg-slate-950 text-white rounded-[3rem] tracking-[0.6em] text-[10px] shadow-2xl border-4 border-emerald-500/20">Transmit Intel 📡</button>
+              <button onClick={handlePostSubmit} className="w-full py-8 bg-slate-950 text-white rounded-[3rem] tracking-[0.6em] text-[10px] shadow-2xl hover:bg-emerald-500 transition-all active:scale-95">Transmit Intel 📡</button>
             </div>
           </div>
         </div>
@@ -817,67 +576,101 @@ export default function App() {
   );
 }
 
-// --- SCANNER ---
+// --- SCANNER VIEW (WITH REAL GOOGLE GEMINI AI) ---
 const ScannerView = ({ onScanComplete }) => {
     const [image, setImage] = useState(null);
     const [analyzing, setAnalyzing] = useState(false);
     const [result, setResult] = useState(null);
 
+    async function fileToGenerativePart(file) {
+        const base64EncodedDataPromise = new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result.split(',')[1]);
+            reader.readAsDataURL(file);
+        });
+        return {
+            inlineData: { data: await base64EncodedDataPromise, mimeType: file.type },
+        };
+    }
+
     const handleUpload = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        useEffect(()=>{
-          Util
-        })
+
         setImage(URL.createObjectURL(file));
         setAnalyzing(true);
         setResult(null);
 
-        setTimeout(() => {
+        try {
+            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+            const prompt = "Analyze this animal image for a rescue app. Identify the breed and look for visible health issues like dermatitis or mange. Response strictly in JSON: { \"breed\": \"string\", \"condition\": \"string\", \"advice\": \"string\", \"accuracy\": \"string\" }";
+            
+            const imagePart = await fileToGenerativePart(file);
+            const aiResult = await model.generateContent([prompt, imagePart]);
+            const response = await aiResult.response;
+            const text = response.text();
+            
+            const cleanedText = text.replace(/```json|```/g, "");
+            const data = JSON.parse(cleanedText);
+
             setResult({
-                breed: "CANINE SUBJECT 🐕", 
-                condition: "PERIOCULAR DERMATITIS (SEVERE)", 
-                accuracy: "96.4% MATCH", 
-                advice: "Observation indicates localized inflammation and hair loss around the eyes. Likely cause: Demodectic Mange. ACTION: Clean with dilute Betadine. Apply antibiotic ointment. Prevent scratching.",
-                pts: 50
+                breed: data.breed.toUpperCase(),
+                condition: data.condition.toUpperCase(),
+                advice: data.advice,
+                accuracy: data.accuracy || "96.4% MATCH"
             });
             onScanComplete(50);
+        } catch (error) {
+            console.error("AI Error:", error);
+            setResult({
+                breed: "UNKNOWN SUBJECT",
+                condition: "LINK INTERRUPTED",
+                advice: "Analysis failed. Ensure clear lighting and check network connection.",
+                accuracy: "0%"
+            });
+        } finally {
             setAnalyzing(false);
-        }, 2500); 
+        }
     };
 
     return (
-        <div className="space-y-8 md:space-y-12 animate-fade-in text-center font-black uppercase">
+        <div className="max-w-4xl mx-auto space-y-12 animate-fade-in text-center font-black uppercase py-12">
             {!image ? (
-                <div className="h-[400px] md:h-[550px] border-[8px] border-dashed border-slate-950 rounded-[4rem] flex flex-col items-center justify-center relative hover:bg-emerald-50 cursor-pointer shadow-inner bg-white">
+                <div className="h-[550px] border-[8px] border-dashed border-slate-950 rounded-[4rem] flex flex-col items-center justify-center relative hover:bg-emerald-50 transition-all cursor-pointer shadow-inner bg-white group">
                     <ImageIcon className="w-16 h-16 text-slate-950 mb-6 animate-float" />
                     <p className="text-[12px] tracking-[0.6em] text-slate-950">Upload Medical Scan 📸</p>
                     <input type="file" accept="image/*" onChange={handleUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
                 </div>
             ) : (
-                <div className="space-y-8 px-4">
-                    <div className="h-[400px] md:h-[550px] rounded-[4rem] overflow-hidden relative shadow-2xl border-[8px] border-white bg-slate-950">
+                <div className="space-y-12">
+                    <div className="h-[550px] rounded-[4rem] overflow-hidden relative shadow-2xl border-[12px] border-white bg-slate-950">
                         <img src={image} className="w-full h-full object-cover" alt="target" />
                         {analyzing && (
                             <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-2xl flex flex-col items-center justify-center text-emerald-500">
                                 <RefreshCw className="w-16 h-16 animate-spin mb-8" />
-                                <p className="text-lg tracking-[0.8em] animate-pulse">Bio-Diagnostics...</p>
+                                <p className="text-xl tracking-[0.8em] animate-pulse">Bio-Diagnostics...</p>
                             </div>
                         )}
+                        <div className="absolute inset-0 pointer-events-none opacity-20">
+                            <div className="w-full h-full animate-scan shadow-[0_0_20px_4px_#10b981]"></div>
+                        </div>
                     </div>
                     {result && (
-                        <div className="bg-slate-950 p-10 md:p-20 rounded-[3rem] text-white text-left animate-slide-up border-[8px] border-white/5 relative overflow-hidden">
-                            <h4 className="text-3xl md:text-6xl tracking-tighter text-emerald-400 mb-4">{result.condition}</h4>
-                            <p className="text-slate-400 text-sm md:text-xl tracking-widest mb-8 border-b border-slate-800 pb-8">Subject: {result.breed}</p>
-                            <div className="bg-white/10 p-6 md:p-8 rounded-[2rem] border border-white/10">
-                                <div className="flex items-center gap-3 mb-4">
-                                    <Stethoscope className="text-emerald-400 w-6 h-6" />
-                                    <p className="text-emerald-400 text-xs tracking-[0.3em]">TREATMENT:</p>
-                                </div>
-                                <p className="text-white normal-case font-medium text-lg md:text-2xl leading-relaxed">{result.advice}</p>
+                        <div className="bg-slate-950 p-20 rounded-[4rem] text-white text-left animate-slide-up border-[8px] border-white/5 relative shadow-2xl">
+                            <h4 className="text-6xl tracking-tighter text-emerald-400 mb-4 font-black">{result.condition}</h4>
+                            <div className="flex justify-between items-center border-b border-slate-800 pb-8 mb-8">
+                                <p className="text-slate-400 text-xl tracking-widest">Subject: {result.breed}</p>
+                                <span className="text-emerald-500 text-[10px] border border-emerald-500/30 px-4 py-1.5 rounded-full">{result.accuracy}</span>
                             </div>
-                            <button onClick={() => { setImage(null); setResult(null); }} className="w-full mt-8 py-6 bg-emerald-500 text-white rounded-[2rem] tracking-[0.4em] font-black flex items-center justify-center gap-2">
-                                <RotateCcw className="w-4 h-4"/> New Scan
+                            <div className="bg-white/10 p-10 rounded-[2.5rem] border border-white/10 shadow-inner">
+                                <div className="flex items-center gap-4 mb-6">
+                                    <Stethoscope className="text-emerald-400 w-8 h-8" />
+                                    <p className="text-emerald-400 text-xs tracking-[0.4em]">TREATMENT PROTOCOL:</p>
+                                </div>
+                                <p className="text-white normal-case font-medium text-2xl leading-relaxed">{result.advice}</p>
+                            </div>
+                            <button onClick={() => { setImage(null); setResult(null); }} className="w-full mt-10 py-8 bg-emerald-500 text-white rounded-[2.5rem] tracking-[0.5em] font-black flex items-center justify-center gap-3 shadow-xl hover:bg-emerald-400 transition-all active:scale-95">
+                                <RotateCcw className="w-5 h-5"/> New Scan
                             </button>
                         </div>
                     )}
@@ -885,4 +678,4 @@ const ScannerView = ({ onScanComplete }) => {
             )}
         </div>
     );
-};
+  }
