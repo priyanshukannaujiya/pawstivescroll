@@ -22,7 +22,10 @@ import 'leaflet/dist/leaflet.css';
 
 // --- API CONFIGURATION ---
 const API_KEY = import.meta.env.VITE_GEMINI_KEY;
-const genAI = new GoogleGenerativeAI(API_KEY);
+if (!API_KEY) {
+  console.error('Gemini API Key is missing! Please check Vercel environment variables.');
+}
+const genAI = API_KEY ? new GoogleGenerativeAI(API_KEY) : null;
 
 // --- CUSTOM STYLES ---
 const styles = `
@@ -174,12 +177,40 @@ const SafeImage = ({ src, className }) => {
 };
 
 export default function App() {
-  const [screen, setScreen] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('cs_screen') : 'auth') || 'auth');
-  const [tab, setTab] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('cs_tab') : 'feed') || 'feed');
-  const [user, setUser] = useState(() => (typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('cs_user')) : null) || null);
-  const [karma, setKarma] = useState(() => (typeof window !== 'undefined' ? parseInt(localStorage.getItem('cs_karma')) : 50) || 50);
-  const [feed, setFeed] = useState(() => (typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('cs_feed')) : INITIAL_FEED) || INITIAL_FEED);
-  const [following, setFollowing] = useState(() => (typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('cs_following')) : []) || []);
+  const [screen, setScreen] = useState(() => {
+    try {
+      return (typeof window !== 'undefined' ? localStorage.getItem('cs_screen') : 'auth') || 'auth';
+    } catch { return 'auth'; }
+  });
+  const [tab, setTab] = useState(() => {
+    try {
+      return (typeof window !== 'undefined' ? localStorage.getItem('cs_tab') : 'feed') || 'feed';
+    } catch { return 'feed'; }
+  });
+  const [user, setUser] = useState(() => {
+    try {
+      const val = typeof window !== 'undefined' ? localStorage.getItem('cs_user') : null;
+      return val ? JSON.parse(val) : null;
+    } catch { return null; }
+  });
+  const [karma, setKarma] = useState(() => {
+    try {
+      const val = typeof window !== 'undefined' ? localStorage.getItem('cs_karma') : '50';
+      return parseInt(val) || 50;
+    } catch { return 50; }
+  });
+  const [feed, setFeed] = useState(() => {
+    try {
+      const val = typeof window !== 'undefined' ? localStorage.getItem('cs_feed') : null;
+      return val ? JSON.parse(val) : INITIAL_FEED;
+    } catch { return INITIAL_FEED; }
+  });
+  const [following, setFollowing] = useState(() => {
+    try {
+      const val = typeof window !== 'undefined' ? localStorage.getItem('cs_following') : null;
+      return val ? JSON.parse(val) : [];
+    } catch { return []; }
+  });
   const [liveData, setLiveData] = useState({ cruelty: 14829, hunger: 52044, rescued: 128956 });
   const [searchQuery, setSearchQuery] = useState('');
   const [authForm, setAuthForm] = useState({ email: '', password: '' });
@@ -218,6 +249,10 @@ export default function App() {
   // --- DATABASE CONNECTIVITY (SUPABASE) ---
   useEffect(() => {
     const fetchLiveIntel = async () => {
+      if (!supabase) {
+        console.warn("Supabase client not initialized. Skipping fetch.");
+        return;
+      }
       const { data, error } = await supabase
         .from('posts')
         .select('*')
@@ -229,6 +264,8 @@ export default function App() {
     };
 
     fetchLiveIntel();
+
+    if (!supabase) return;
 
     // Subscribe to real-time updates
     const channel = supabase
@@ -275,6 +312,13 @@ export default function App() {
       age: postForm.age,
       location: user?.city || "Unknown"
     };
+
+    if (!supabase) {
+      console.warn("Supabase not initialized. Adding locally only.");
+      setFeed([{ ...newEntry, id: Date.now(), date: "JUST NOW" }, ...feed]);
+      setIsModalOpen(false);
+      return;
+    }
 
     // SYNC TO SUPABASE (GLOBAL)
     const { error } = await supabase
@@ -849,6 +893,7 @@ const ScannerView = ({ onScanComplete }) => {
     setResult(null);
 
     try {
+      if (!genAI) throw new Error("AI Service not configured on this deployment.");
       const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
       const prompt = `Analyze this animal image for a rescue app. 
             Identify the breed and look for visible health issues like dermatitis, mange, or injury. 
