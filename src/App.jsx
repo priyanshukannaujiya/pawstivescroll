@@ -19,7 +19,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
 // --- API CONFIGURATION ---
-const API_KEY = import.meta.env.VITE_GEMINI_KEY || "AIzaSyDUP_WWDjNsdhTAInZPQ_HsEqnpPrQNvJU";
+const API_KEY = import.meta.env.VITE_GEMINI_KEY;
 const genAI = new GoogleGenerativeAI(API_KEY);
 
 // --- CUSTOM STYLES ---
