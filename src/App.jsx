@@ -604,7 +604,7 @@ const ScannerView = ({ onScanComplete }) => {
     setResult(null);
 
     try {
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }, { apiVersion: "v1" });
+      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
       const prompt = `Analyze this animal image for a rescue app. 
             Identify the breed and look for visible health issues like dermatitis, mange, or injury. 
             Response MUST be exactly in this JSON format and nothing else: 
