@@ -9,6 +9,8 @@ import {
   Flame, Skull, Droplets, Package, Radar, Map as MapIcon,
   FileText, BarChart3, Radio, ChevronLeft, Share, Users, RotateCcw
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { supabase } from './supabaseClient';
 
 // --- GOOGLE AI IMPORT ---
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -44,22 +46,6 @@ const styles = `
     border: 2px solid currentColor;
     animation: sonar-ripple 2s infinite;
   }
-  @keyframes float {
-    0% { transform: translateY(0px); }
-    50% { transform: translateY(-10px); }
-    100% { transform: translateY(0px); }
-  }
-  .animate-float {
-    animation: float 4s ease-in-out infinite;
-  }
-  @keyframes breathe {
-    0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
-    70% { transform: scale(1.05); box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }
-    100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
-  }
-  .animate-breathe {
-    animation: breathe 2s infinite;
-  }
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
@@ -75,6 +61,13 @@ const styles = `
     display: flex;
     width: max-content;
     animation: ticker 30s linear infinite;
+  }
+  .text-shadow-sm {
+    text-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  }
+  .readable-text {
+    line-height: 1.6;
+    letter-spacing: 0.01em;
   }
 `;
 
@@ -222,6 +215,34 @@ export default function App() {
     return () => clearInterval(ticker);
   }, [screen, tab, user, karma, feed, following]);
 
+  // --- DATABASE CONNECTIVITY (SUPABASE) ---
+  useEffect(() => {
+    const fetchLiveIntel = async () => {
+      const { data, error } = await supabase
+        .from('posts')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!error && data && data.length > 0) {
+        setFeed(data);
+      }
+    };
+
+    fetchLiveIntel();
+
+    // Subscribe to real-time updates
+    const channel = supabase
+      .channel('public:posts')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, payload => {
+        setFeed(prev => [payload.new, ...prev]);
+        setNotification("NEW INTEL DETECTED 📡");
+        setTimeout(() => setNotification(null), 3000);
+      })
+      .subscribe();
+
+    return () => supabase.removeChannel(channel);
+  }, []);
+
   const addKarma = (pts) => {
     setKarma(prev => prev + pts);
     setNotification(`+${pts} IMPACT POINTS LOGGED`);
@@ -240,24 +261,32 @@ export default function App() {
     });
   };
 
-  const handlePostSubmit = () => {
+  const handlePostSubmit = async () => {
     if (!postForm.title || !postForm.image) return alert("Required.");
+
     const newEntry = {
-      id: Date.now(),
       type: postForm.type,
       headline: postForm.type === 'news' ? postForm.title : null,
       name: postForm.type === 'adoption' ? postForm.title : null,
       image: postForm.image,
       author: { name: user.name, avatar: user.name.substring(0, 2).toUpperCase() },
-      date: "JUST NOW",
       content: postForm.desc,
       bio: postForm.desc,
       age: postForm.age,
-      liked: false,
-      comments: [],
       location: user?.city || "Unknown"
     };
-    setFeed([newEntry, ...feed]);
+
+    // SYNC TO SUPABASE (GLOBAL)
+    const { error } = await supabase
+      .from('posts')
+      .insert([newEntry]);
+
+    if (error) {
+      console.error("Supabase Error:", error);
+      // Fallback to local state if DB is not ready
+      setFeed([{ ...newEntry, id: Date.now(), date: "JUST NOW" }, ...feed]);
+    }
+
     setIsModalOpen(false);
     addKarma(25);
   };
@@ -275,39 +304,70 @@ export default function App() {
         <img src="https://images.unsplash.com/photo-1548199973-03cce0bbc87b?q=80&w=2000" className="w-full h-full object-cover" alt="bg" />
         <div className="absolute inset-0 bg-gradient-to-b from-slate-950 via-slate-950/20 to-slate-950"></div>
       </div>
-      <div className="w-full max-w-md space-y-12 animate-fade-in relative z-10 font-black uppercase">
-        <div className="bg-emerald-500 w-24 h-24 rounded-[2.5rem] flex items-center justify-center mx-auto shadow-2xl animate-float border-4 border-white/10"><PawPrint className="text-white w-12 h-12" /></div>
-        <h1 className="text-5xl text-white tracking-tighter leading-none">PAWSITIVE<br /><span className="text-emerald-400">SCROLL</span></h1>
-        <div className="space-y-4">
-          <input type="email" value={authForm.email} onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })} placeholder="Identity (Email)" className="w-full p-6 bg-slate-950 border-2 border-slate-800 text-emerald-400 rounded-[2rem] outline-none shadow-xl" />
-          <input type="password" value={authForm.password} onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })} placeholder="Access Key" className="w-full p-6 bg-slate-950 border-2 border-slate-800 text-emerald-400 rounded-[2rem] outline-none shadow-xl" />
-          <button onClick={() => setScreen('setup')} className="w-full py-7 bg-emerald-500 text-white rounded-[2rem] font-black uppercase tracking-widest text-[11px] shadow-2xl active:scale-95">Initialize Session</button>
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="w-full max-w-md space-y-10 relative z-10"
+      >
+        <motion.div
+          animate={{ y: [0, -10, 0] }}
+          transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+          className="bg-emerald-500 w-24 h-24 rounded-[2.5rem] flex items-center justify-center mx-auto shadow-2xl border-4 border-white/10"
+        >
+          <PawPrint className="text-white w-12 h-12" />
+        </motion.div>
+
+        <div className="space-y-2">
+          <h1 className="text-5xl font-black text-white tracking-tighter leading-none uppercase">
+            PAWSITIVE<br /><span className="text-emerald-400">SCROLL</span>
+          </h1>
+          <p className="text-slate-400 font-medium tracking-widest text-[10px] uppercase">Rescue Command Interface</p>
         </div>
-      </div>
+
+        <div className="space-y-4">
+          <input type="email" value={authForm.email} onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })} placeholder="Identity (Email)" className="w-full p-6 bg-slate-900/50 backdrop-blur-md border-2 border-slate-800 text-emerald-400 rounded-[2rem] outline-none shadow-xl focus:border-emerald-500/50 transition-all font-bold" />
+          <input type="password" value={authForm.password} onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })} placeholder="Access Key" className="w-full p-6 bg-slate-900/50 backdrop-blur-md border-2 border-slate-800 text-emerald-400 rounded-[2rem] outline-none shadow-xl focus:border-emerald-500/50 transition-all font-bold" />
+          <button onClick={() => setScreen('setup')} className="w-full py-7 bg-emerald-500 text-white rounded-[2rem] font-black uppercase tracking-widest text-[12px] shadow-2xl hover:bg-emerald-400 active:scale-95 transition-all">Initialize Session</button>
+        </div>
+      </motion.div>
     </div>
   );
 
   if (screen === 'setup') return (
-    <div className="min-h-screen bg-emerald-600 flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-4xl rounded-[3rem] shadow-2xl flex flex-col md:flex-row overflow-hidden min-h-[500px]">
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        className="bg-white w-full max-w-4xl rounded-[3rem] shadow-2xl flex flex-col md:flex-row overflow-hidden min-h-[500px]"
+      >
         <div className="hidden md:block w-1/2 relative">
           <img src="https://images.unsplash.com/photo-1543852786-1cf6624b9987?q=80&w=2000" className="w-full h-full object-cover" alt="setup" />
           <div className="absolute inset-0 bg-emerald-950/40 backdrop-blur-sm"></div>
+          <div className="absolute bottom-12 left-12 right-12 text-white">
+            <h3 className="text-2xl font-black uppercase tracking-tight">Mission Ready?</h3>
+            <p className="opacity-80 text-sm font-medium mt-2">Establish your field credentials to begin operations.</p>
+          </div>
         </div>
         <div className="w-full md:w-1/2 p-12 flex flex-col justify-center">
           <h2 className="text-4xl font-black text-slate-950 uppercase tracking-tighter mb-8">Identity Setup</h2>
           <div className="space-y-6">
-            <input id="s-name" placeholder="Agent Callsign" className="w-full p-7 bg-slate-950 text-emerald-400 font-black rounded-[2rem] outline-none" />
-            <input id="s-city" placeholder="Division City" className="w-full p-7 bg-slate-950 text-emerald-400 font-black rounded-[2rem] outline-none" />
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase text-slate-400 ml-4 tracking-widest">Agent Callsign</label>
+              <input id="s-name" placeholder="E.g. Ghost-01" className="w-full p-7 bg-slate-50 border-2 border-transparent focus:border-emerald-500/20 text-emerald-600 font-bold rounded-[2rem] outline-none transition-all" />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase text-slate-400 ml-4 tracking-widest">Division City</label>
+              <input id="s-city" placeholder="E.g. Mumbai" className="w-full p-7 bg-slate-50 border-2 border-transparent focus:border-emerald-500/20 text-emerald-600 font-bold rounded-[2rem] outline-none transition-all" />
+            </div>
             <button onClick={() => {
               const n = document.getElementById('s-name').value;
               const c = document.getElementById('s-city').value;
               if (!n || !c) return alert("Required.");
               setUser({ name: n, city: c }); setScreen('app'); addKarma(50);
-            }} className="w-full py-8 bg-slate-950 text-white rounded-[2.5rem] font-black uppercase tracking-widest shadow-xl active:scale-95">Activate Profile</button>
+            }} className="w-full py-8 bg-slate-950 text-white rounded-[2.5rem] font-black uppercase tracking-widest shadow-xl hover:bg-emerald-600 active:scale-95 transition-all mt-4">Activate Profile</button>
           </div>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 
@@ -322,13 +382,19 @@ export default function App() {
       )}
 
       {/* NAVBAR */}
-      <nav className="sticky top-0 z-40 bg-white/95 backdrop-blur-xl border-b border-slate-200 px-10 h-24 flex items-center justify-between shadow-sm">
+      <nav className="sticky top-0 z-40 bg-white/95 backdrop-blur-xl border-b border-slate-200 px-6 md:px-10 h-24 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-4 cursor-pointer" onClick={() => setTab('feed')}>
-          <div className="bg-slate-950 p-2.5 rounded-2xl shadow-lg"><PawPrint className="w-6 h-6 text-white" /></div>
-          <span className="font-black text-2xl tracking-tighter text-slate-900 uppercase">PAWSITIVE SCROLL</span>
+          <motion.div
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            className="bg-slate-950 p-2.5 rounded-2xl shadow-lg"
+          >
+            <PawPrint className="w-6 h-6 text-white" />
+          </motion.div>
+          <span className="font-black text-xl md:text-2xl tracking-tighter text-slate-900 uppercase">PAWSITIVE SCROLL</span>
         </div>
 
-        <div className="hidden md:flex items-center gap-1 bg-slate-100 p-1 rounded-[2rem] border border-slate-200">
+        <div className="hidden lg:flex items-center gap-1 bg-slate-100 p-1 rounded-[2rem] border border-slate-200">
           {[
             { id: 'feed', label: 'Feed 📰' },
             { id: 'ops', label: 'Map 🚁' },
@@ -338,172 +404,298 @@ export default function App() {
             { id: 'logistics', label: 'Supply 📦' },
             { id: 'profile', label: 'Profile 💂' }
           ].map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)} className={`px-6 py-2.5 rounded-[1.5rem] text-xs font-extrabold uppercase tracking-wider transition-all ${tab === t.id ? 'bg-white text-emerald-600 shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-900'}`}>
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`px-5 py-2.5 rounded-[1.5rem] text-[10px] font-black uppercase tracking-wider transition-all relative ${tab === t.id ? 'text-emerald-600' : 'text-slate-500 hover:text-slate-900'}`}
+            >
+              {tab === t.id && (
+                <motion.div
+                  layoutId="activeTab"
+                  className="absolute inset-0 bg-white shadow-sm border border-slate-200 rounded-[1.5rem] -z-10"
+                />
+              )}
               {t.label}
             </button>
           ))}
         </div>
 
-        <div className="flex items-center gap-6">
-          <div className="bg-emerald-50 px-6 py-3 rounded-2xl border border-emerald-100 flex items-center gap-3">
-            <Zap className="w-5 h-5 text-emerald-600 fill-emerald-600" />
-            <span className="text-sm font-black text-emerald-700 uppercase">{karma}</span>
+        <div className="flex items-center gap-4 md:gap-6">
+          <div className="flex bg-emerald-50 px-4 py-2 md:px-6 md:py-3 rounded-2xl border border-emerald-100 items-center gap-2 md:gap-3">
+            <Zap className="w-4 h-4 md:w-5 md:h-5 text-emerald-600 fill-emerald-600" />
+            <span className="text-xs md:text-sm font-black text-emerald-700 uppercase">{karma}</span>
           </div>
-          <button onClick={() => setIsModalOpen(true)} className="bg-slate-950 text-white p-4 rounded-2xl shadow-xl hover:scale-110 active:scale-95 transition-all"><Plus className="w-7 h-7" /></button>
+          <motion.button
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
+            onClick={() => setIsModalOpen(true)}
+            className="bg-slate-950 text-white p-3 md:p-4 rounded-2xl shadow-xl transition-all"
+          >
+            <Plus className="w-6 h-6 md:w-7 md:h-7" />
+          </motion.button>
         </div>
       </nav>
 
+      {/* MOBILE BOTTOM NAV */}
+      <div className="lg:hidden fixed bottom-6 left-6 right-6 z-[100]">
+        <div className="bg-slate-950/90 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] p-2 flex items-center justify-around shadow-2xl overflow-x-auto no-scrollbar">
+          {[
+            { id: 'feed', icon: <Home className="w-5 h-5" />, label: 'Feed' },
+            { id: 'ops', icon: <MapIcon className="w-5 h-5" />, label: 'Map' },
+            { id: 'ngos', icon: <Stethoscope className="w-5 h-5" />, label: 'NGOs' },
+            { id: 'scanner', icon: <Radar className="w-5 h-5" />, label: 'Scan' },
+            { id: 'manual', icon: <BookOpen className="w-5 h-5" />, label: 'Intel' },
+            { id: 'logistics', icon: <Package className="w-5 h-5" />, label: 'Drops' },
+            { id: 'profile', icon: <User className="w-5 h-5" />, label: 'Me' }
+          ].map(t => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`p-4 rounded-full transition-all relative flex flex-col items-center gap-1 min-w-[64px] ${tab === t.id ? 'text-emerald-400' : 'text-slate-500'}`}
+            >
+              {tab === t.id && (
+                <motion.div
+                  layoutId="mobileTabGlow"
+                  className="absolute inset-0 bg-emerald-500/10 rounded-full blur-md"
+                />
+              )}
+              {t.icon}
+              <span className="text-[8px] font-black uppercase tracking-tighter">{t.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* TABS */}
-      <main className="max-w-7xl mx-auto px-10 py-12 text-slate-950">
-
-        {tab === 'feed' && (
-          <div className="space-y-12 animate-fade-in">
-            <div className="bg-slate-950 p-4 rounded-2xl overflow-hidden relative border-y-4 border-emerald-500 shadow-2xl">
-              <div className="animate-ticker font-black text-[11px] text-white uppercase tracking-widest gap-12 flex">
-                <span><Skull className="inline text-rose-500 mr-2" /> Cruelty Cases: {liveData.cruelty.toLocaleString()}</span>
-                <span><Flame className="inline text-orange-500 mr-2" /> Hunger Alerts: {liveData.hunger.toLocaleString()}</span>
-                <span><HandHeart className="inline text-emerald-500 mr-2" /> Lives Saved: {liveData.rescued.toLocaleString()}</span>
-                <span><Skull className="inline text-rose-500 mr-2" /> Cruelty Cases: {liveData.cruelty.toLocaleString()}</span>
-                <span><Flame className="inline text-orange-500 mr-2" /> Hunger Alerts: {liveData.hunger.toLocaleString()}</span>
-                <span><HandHeart className="inline text-emerald-500 mr-2" /> Lives Saved: {liveData.rescued.toLocaleString()}</span>
+      <main className="max-w-7xl mx-auto px-6 md:px-10 py-12 pb-40 lg:pb-12 text-slate-950 overflow-x-hidden">
+        <AnimatePresence mode="wait">
+          {tab === 'feed' && (
+            <motion.div
+              key="feed"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="space-y-12"
+            >
+              <div className="bg-slate-950 p-4 rounded-2xl overflow-hidden relative border-y-4 border-emerald-500 shadow-2xl">
+                <div className="animate-ticker font-black text-[11px] text-white uppercase tracking-widest gap-12 flex">
+                  <span><Skull className="inline text-rose-500 mr-2" /> Cruelty Cases: {liveData.cruelty.toLocaleString()}</span>
+                  <span><Flame className="inline text-orange-500 mr-2" /> Hunger Alerts: {liveData.hunger.toLocaleString()}</span>
+                  <span><HandHeart className="inline text-emerald-500 mr-2" /> Lives Saved: {liveData.rescued.toLocaleString()}</span>
+                  <span><Skull className="inline text-rose-500 mr-2" /> Cruelty Cases: {liveData.cruelty.toLocaleString()}</span>
+                  <span><Flame className="inline text-orange-500 mr-2" /> Hunger Alerts: {liveData.hunger.toLocaleString()}</span>
+                  <span><HandHeart className="inline text-emerald-500 mr-2" /> Lives Saved: {liveData.rescued.toLocaleString()}</span>
+                </div>
               </div>
-            </div>
 
-            <header className="flex items-end justify-between border-l-8 border-emerald-500 pl-8 font-black uppercase">
-              <div>
-                <h2 className="text-7xl tracking-tighter leading-none">Mission Hub 📡</h2>
-                <p className="text-slate-400 text-[11px] tracking-[0.4em] mt-4 font-black">District Deployment: <span className="text-emerald-600">{user?.city} Command</span></p>
-              </div>
-              <div className="flex bg-white p-1 rounded-2xl shadow-sm border border-slate-200 font-black uppercase">
-                {['all', 'news', 'adoption'].map(f => (
-                  <button key={f} onClick={() => setFilter(f)} className={`px-6 py-3 rounded-xl text-[10px] tracking-widest transition-all ${filter === f ? 'bg-slate-950 text-white shadow-xl' : 'text-slate-400 hover:text-slate-900'}`}>{f}</button>
-                ))}
-              </div>
-            </header>
+              <header className="flex flex-col md:flex-row md:items-end justify-between border-l-8 border-emerald-500 pl-8 gap-6">
+                <div className="space-y-2">
+                  <h2 className="text-6xl md:text-7xl font-black tracking-tighter leading-none uppercase">Mission Hub 📡</h2>
+                  <p className="text-slate-400 text-[10px] tracking-[0.4em] font-black uppercase">District Deployment: <span className="text-emerald-600">{user?.city} Command</span></p>
+                </div>
+                <div className="flex bg-slate-100 p-1 rounded-2xl border border-slate-200">
+                  {['all', 'news', 'adoption'].map(f => (
+                    <button key={f} onClick={() => setFilter(f)} className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${filter === f ? 'bg-slate-950 text-white shadow-lg' : 'text-slate-400 hover:text-slate-900'}`}>{f}</button>
+                  ))}
+                </div>
+              </header>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12 font-black uppercase">
-              {filteredFeed.map(item => (
-                <div key={item.id} className="bg-white rounded-[3rem] border border-slate-200 overflow-hidden hover:shadow-2xl hover:-translate-y-2 transition-all group flex flex-col h-full border-b-8 border-slate-100">
-                  <div className="h-72 relative overflow-hidden" onClick={() => item.type === 'news' && setSelectedArticle(item)}>
-                    <SafeImage src={item.image} className="w-full h-full object-cover cursor-pointer" />
-                    <div className="absolute top-8 left-8">
-                      <span className={`px-4 py-1.5 rounded-lg text-[10px] text-white ${item.type === 'news' ? 'bg-emerald-500' : 'bg-blue-600'}`}>{item.type}</span>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 md:gap-12">
+                {filteredFeed.map(item => (
+                  <motion.div
+                    layout
+                    key={item.id}
+                    className="bg-white rounded-[3rem] border border-slate-200 overflow-hidden shadow-sm hover:shadow-2xl transition-all group flex flex-col h-full border-b-8 border-slate-100"
+                  >
+                    <div className="h-72 relative overflow-hidden" onClick={() => item.type === 'news' && setSelectedArticle(item)}>
+                      <SafeImage src={item.image} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 cursor-pointer" />
+                      <div className="absolute top-8 left-8">
+                        <span className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase text-white shadow-lg ${item.type === 'news' ? 'bg-emerald-500' : 'bg-blue-600'}`}>{item.type}</span>
+                      </div>
                     </div>
-                  </div>
-                  <div className="p-10 flex flex-col flex-1">
-                    <h3 className="text-3xl tracking-tight leading-tight mb-8 line-clamp-2 cursor-pointer" onClick={() => setSelectedArticle(item)}>{item.headline || item.name}</h3>
-                    <p className="text-slate-500 text-sm font-medium mb-10 normal-case italic line-clamp-3 leading-relaxed">"{item.bio || item.content}"</p>
-                    <button onClick={() => item.type === 'news' ? setSelectedArticle(item) : window.open(`https://wa.me/${item.phone}`)} className="mt-auto w-full bg-slate-950 text-white py-5 rounded-[2rem] tracking-[0.2em] text-[10px] hover:bg-black transition-all shadow-xl">
-                      {item.type === 'news' ? 'Read Full Report' : 'Submit Query'}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {tab === 'ops' && (
-          <div className="space-y-8 animate-fade-in h-[calc(100vh-200px)] flex flex-col font-black uppercase">
-            <h2 className="text-6xl tracking-tighter">Sector Grid 🚁</h2>
-            <div className="flex-1 rounded-[3rem] overflow-hidden shadow-2xl border-[8px] border-white relative z-0">
-              <div className="absolute inset-0 pointer-events-none z-[400] opacity-30">
-                <div className="w-full h-full animate-scan shadow-[0_0_20px_4px_#10b981]"></div>
-              </div>
-              <MapContainer center={[19.0760, 72.8777]} zoom={12} style={{ height: '100%', width: '100%' }} zoomControl={false}>
-                <TileLayer attribution='&copy; CARTO' url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
-                {ACTIVE_CASES.map((c) => (
-                  <Marker key={c.id} position={[c.lat, c.lng]} icon={getTacticalIcon(c.severity, c.title)}>
-                    <Popup><div className="font-black uppercase text-sm">{c.title}<br /><span className="text-[10px] text-slate-400">{c.severity}</span></div></Popup>
-                  </Marker>
-                ))}
-              </MapContainer>
-            </div>
-          </div>
-        )}
-
-        {tab === 'scanner' && <ScannerView onScanComplete={addKarma} />}
-
-        {tab === 'ngos' && (
-          <div className="space-y-12 animate-fade-in font-black uppercase">
-            <h2 className="text-6xl tracking-tighter border-l-8 border-blue-500 pl-8">NGO Registry 🏥</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-              {NGO_DATABASE.map(ngo => (
-                <div key={ngo.id} className="bg-white p-10 rounded-[4rem] border border-slate-200 flex items-center gap-10 shadow-sm hover:border-blue-500 transition-all">
-                  <SafeImage src={ngo.image} className="w-40 h-40 rounded-[2.5rem] object-cover shadow-2xl" />
-                  <div>
-                    <h4 className="text-3xl tracking-tight leading-none mb-2">{ngo.name}</h4>
-                    <p className="text-[11px] text-slate-400 tracking-widest mb-6">{ngo.city} Division</p>
-                    <button onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${ngo.gps}`)} className="bg-slate-950 text-white px-8 py-4 rounded-2xl font-black text-[10px] tracking-widest flex items-center gap-2 shadow-lg"><Navigation className="w-4 h-4" /> Start Nav</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {tab === 'manual' && (
-          <div className="space-y-20 animate-fade-in font-black uppercase text-center">
-            <h2 className="text-7xl text-amber-900 tracking-tighter leading-none">Operational Protocol 📖</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {APP_PROTOCOLS.map(prot => (
-                <div key={prot.id} className="bg-white p-8 rounded-[2.5rem] border border-stone-200 shadow-sm flex flex-col items-center">
-                  <div className="bg-stone-50 p-4 rounded-[1.5rem] mb-4">{prot.icon}</div>
-                  <h4 className="text-xl text-amber-900 mb-2">{prot.title}</h4>
-                  <p className="text-stone-500 font-bold text-xs normal-case leading-relaxed">{prot.desc}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {tab === 'logistics' && (
-          <div className="space-y-12 animate-fade-in font-black uppercase">
-            <h2 className="text-7xl tracking-tighter border-l-8 border-amber-500 pl-8">Supply Lines 📦</h2>
-            {SUPPLY_DROPS.map(drop => (
-              <div key={drop.id} className="bg-white p-10 rounded-[4rem] border border-slate-200 shadow-xl flex items-center gap-10">
-                <SafeImage src={drop.image} className="w-32 h-32 rounded-[2rem] object-cover" />
-                <div className="flex-1 space-y-4">
-                  <h4 className="text-3xl text-slate-950 tracking-tight leading-none">{drop.title}</h4>
-                  <div className="h-6 w-full bg-slate-100 rounded-full overflow-hidden border">
-                    <div className="h-full bg-amber-500" style={{ width: `${(drop.raised / drop.goal) * 100}%` }}></div>
-                  </div>
-                </div>
-                <button onClick={() => addKarma(100)} className="bg-slate-950 text-white px-10 py-6 rounded-[2.5rem] tracking-[0.2em] text-[10px] hover:bg-amber-500 transition-all">Deploy Funds</button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {tab === 'profile' && (
-          <div className="max-w-5xl mx-auto space-y-20 animate-fade-in font-black uppercase">
-            <div className="bg-white p-16 rounded-[5rem] border border-slate-200 shadow-2xl flex items-center gap-16 relative overflow-hidden">
-              <div className="w-56 h-56 bg-slate-100 rounded-[4rem] flex items-center justify-center text-slate-300"><User className="w-24 h-24" /></div>
-              <div className="flex-1 space-y-6">
-                <h2 className="text-7xl tracking-tighter leading-none">{user?.name}</h2>
-                <div className="bg-slate-950 text-white px-12 py-6 rounded-3xl inline-flex items-center gap-5 shadow-2xl">
-                  <Zap className="text-amber-400 w-8 h-8 fill-amber-400" />
-                  <span className="text-xl tracking-widest">{karma} Impact Pts</span>
-                </div>
-              </div>
-              <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="p-6 bg-rose-50 text-rose-600 rounded-3xl border border-rose-100 hover:bg-rose-100 transition-colors"><LogOut className="w-8 h-8" /></button>
-            </div>
-            <div className="space-y-12">
-              <h3 className="text-5xl tracking-tighter px-10 flex items-center gap-6"><Crown className="text-amber-500 w-12 h-12" /> Regional Elite 🏆</h3>
-              <div className="space-y-6 px-10">
-                {LEADERBOARD.map((l, i) => (
-                  <div key={i} className="bg-white p-12 rounded-[4rem] border border-slate-200 flex items-center justify-between shadow-sm hover:translate-x-4 transition-all">
-                    <div className="flex items-center gap-12">
-                      <div className="text-6xl text-slate-100 w-20">0{l.rank}</div>
-                      <h4 className="text-4xl tracking-tighter">{l.name}</h4>
+                    <div className="p-10 flex flex-col flex-1">
+                      <h3 className="text-2xl font-black uppercase tracking-tight leading-tight mb-6 line-clamp-2 cursor-pointer group-hover:text-emerald-600 transition-colors" onClick={() => setSelectedArticle(item)}>{item.headline || item.name}</h3>
+                      <p className="text-slate-500 text-[15px] font-medium mb-10 normal-case readable-text line-clamp-3">"{item.bio || item.content}"</p>
+                      <motion.button
+                        whileHover={{ y: -2 }}
+                        whileTap={{ y: 0 }}
+                        onClick={() => item.type === 'news' ? setSelectedArticle(item) : window.open(`https://wa.me/${item.phone}`)}
+                        className="mt-auto w-full bg-slate-950 text-white py-5 rounded-[2rem] font-black uppercase tracking-[0.2em] text-[10px] shadow-xl hover:bg-emerald-600 transition-all"
+                      >
+                        {item.type === 'news' ? 'Read Full Report' : 'Submit Query'}
+                      </motion.button>
                     </div>
-                    <p className="text-5xl">{l.karma.toLocaleString()}</p>
+                  </motion.div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
+          {tab === 'ops' && (
+            <motion.div
+              key="ops"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="space-y-8 h-[calc(100vh-250px)] flex flex-col"
+            >
+              <h2 className="text-6xl font-black uppercase tracking-tighter leading-none">Sector Grid 🚁</h2>
+              <div className="flex-1 rounded-[3.5rem] overflow-hidden shadow-2xl border-[8px] border-white relative z-0">
+                <div className="absolute inset-0 pointer-events-none z-[400] opacity-30">
+                  <div className="w-full h-full animate-scan shadow-[0_0_20px_4px_#10b981]"></div>
+                </div>
+                <MapContainer center={[19.0760, 72.8777]} zoom={12} style={{ height: '100%', width: '100%' }} zoomControl={false}>
+                  <TileLayer attribution='&copy; CARTO' url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
+                  {ACTIVE_CASES.map((c) => (
+                    <Marker key={c.id} position={[c.lat, c.lng]} icon={getTacticalIcon(c.severity, c.title)}>
+                      <Popup><div className="font-black uppercase text-sm">{c.title}<br /><span className="text-[10px] text-slate-400">{c.severity}</span></div></Popup>
+                    </Marker>
+                  ))}
+                </MapContainer>
+              </div>
+            </motion.div>
+          )}
+
+          {tab === 'scanner' && (
+            <motion.div
+              key="scanner"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+            >
+              <ScannerView onScanComplete={addKarma} />
+            </motion.div>
+          )}
+
+          {tab === 'ngos' && (
+            <motion.div
+              key="ngos"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="space-y-12"
+            >
+              <h2 className="text-6xl font-black uppercase tracking-tighter border-l-8 border-blue-500 pl-8 leading-none">NGO Registry 🏥</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-10">
+                {NGO_DATABASE.map(ngo => (
+                  <motion.div
+                    whileHover={{ scale: 1.02 }}
+                    key={ngo.id}
+                    className="bg-white p-8 md:p-10 rounded-[4rem] border border-slate-200 flex flex-col sm:flex-row items-center gap-8 md:gap-10 shadow-sm transition-all"
+                  >
+                    <SafeImage src={ngo.image} className="w-40 h-40 rounded-[2.5rem] object-cover shadow-2xl" />
+                    <div className="text-center sm:text-left flex-1">
+                      <h4 className="text-2xl font-black uppercase tracking-tight leading-none mb-2">{ngo.name}</h4>
+                      <p className="text-[11px] text-slate-400 tracking-widest font-black uppercase mb-6">{ngo.city} Division</p>
+                      <button onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${ngo.gps}`)} className="bg-slate-950 text-white px-8 py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest flex items-center justify-center sm:justify-start gap-2 shadow-lg w-full sm:w-auto hover:bg-blue-600 transition-colors"><Navigation className="w-4 h-4" /> Start Nav</button>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
+          {tab === 'manual' && (
+            <motion.div
+              key="manual"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="space-y-16 py-8"
+            >
+              <h2 className="text-6xl md:text-7xl font-black uppercase text-amber-900 tracking-tighter leading-none text-center">Operational Protocol 📖</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                {APP_PROTOCOLS.map(prot => (
+                  <div key={prot.id} className="bg-white p-8 rounded-[3rem] border border-stone-200 shadow-sm flex flex-col items-center text-center">
+                    <div className="bg-stone-50 p-5 rounded-[2rem] mb-6">{prot.icon}</div>
+                    <h4 className="text-xl font-black uppercase text-amber-900 mb-3">{prot.title}</h4>
+                    <p className="text-stone-500 font-bold text-xs leading-relaxed readable-text">{prot.desc}</p>
                   </div>
                 ))}
               </div>
-            </div>
-          </div>
-        )}
+            </motion.div>
+          )}
+
+          {tab === 'logistics' && (
+            <motion.div
+              key="logistics"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="space-y-12"
+            >
+              <h2 className="text-6xl md:text-7xl font-black uppercase tracking-tighter border-l-8 border-amber-500 pl-8 leading-none">Supply Lines 📦</h2>
+              <div className="space-y-8">
+                {SUPPLY_DROPS.map(drop => (
+                  <div key={drop.id} className="bg-white p-8 md:p-12 rounded-[4rem] border border-slate-200 shadow-xl flex flex-col md:flex-row items-center gap-10">
+                    <SafeImage src={drop.image} className="w-40 h-40 rounded-[2.5rem] object-cover" />
+                    <div className="flex-1 w-full space-y-6">
+                      <h4 className="text-3xl font-black uppercase text-slate-950 tracking-tight leading-none">{drop.title}</h4>
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-slate-400">
+                          <span>Progress: {Math.round((drop.raised / drop.goal) * 100)}%</span>
+                          <span>Target: ₹{drop.goal.toLocaleString()}</span>
+                        </div>
+                        <div className="h-4 w-full bg-slate-100 rounded-full overflow-hidden border">
+                          <motion.div
+                            initial={{ width: 0 }}
+                            animate={{ width: `${(drop.raised / drop.goal) * 100}%` }}
+                            transition={{ duration: 1.5, ease: "easeOut" }}
+                            className="h-full bg-amber-500"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <button onClick={() => addKarma(100)} className="w-full md:w-auto bg-slate-950 text-white px-12 py-6 rounded-[2.5rem] font-black uppercase tracking-[0.2em] text-[10px] hover:bg-amber-500 transition-all shadow-xl">Deploy Funds</button>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
+          {tab === 'profile' && (
+            <motion.div
+              key="profile"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="max-w-5xl mx-auto space-y-20"
+            >
+              <div className="bg-white p-12 md:p-16 rounded-[5rem] border border-slate-200 shadow-2xl flex flex-col md:flex-row items-center gap-12 md:gap-16 relative overflow-hidden">
+                <div className="w-56 h-56 bg-slate-100 rounded-[4rem] flex items-center justify-center text-slate-300 shadow-inner">
+                  <User className="w-24 h-24" />
+                </div>
+                <div className="flex-1 space-y-6 text-center md:text-left">
+                  <h2 className="text-6xl md:text-7xl font-black uppercase tracking-tighter leading-none">{user?.name}</h2>
+                  <div className="bg-slate-950 text-white px-10 py-5 rounded-3xl inline-flex items-center gap-4 shadow-2xl">
+                    <Zap className="text-amber-400 w-8 h-8 fill-amber-400" />
+                    <span className="text-xl font-black uppercase tracking-widest">{karma} Impact Pts</span>
+                  </div>
+                </div>
+                <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="p-6 bg-rose-50 text-rose-600 rounded-3xl border border-rose-100 hover:bg-rose-100 transition-colors"><LogOut className="w-8 h-8" /></button>
+              </div>
+
+              <div className="space-y-12">
+                <h3 className="text-4xl md:text-5xl font-black uppercase tracking-tighter px-10 flex items-center justify-center md:justify-start gap-6 leading-none"><Crown className="text-amber-500 w-12 h-12" /> Regional Elite 🏆</h3>
+                <div className="space-y-6 px-4 md:px-10">
+                  {LEADERBOARD.map((l, i) => (
+                    <motion.div
+                      whileHover={{ x: 10 }}
+                      key={i}
+                      className="bg-white p-8 md:p-12 rounded-[4rem] border border-slate-200 flex items-center justify-between shadow-sm"
+                    >
+                      <div className="flex items-center gap-8 md:gap-12">
+                        <div className="text-5xl md:text-6xl font-black text-slate-100 w-16 md:w-20">0{l.rank}</div>
+                        <h4 className="text-2xl md:text-4xl font-black uppercase tracking-tighter">{l.name}</h4>
+                      </div>
+                      <p className="text-3xl md:text-5xl font-black text-emerald-600">{l.karma.toLocaleString()}</p>
+                    </motion.div>
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </main>
 
       {/* SOS */}
@@ -516,62 +708,115 @@ export default function App() {
       </button>
 
       {/* ARTICLE VIEW */}
-      {selectedArticle && (
-        <div className="fixed inset-0 z-[200] bg-white overflow-y-auto animate-fade-in no-scrollbar font-black uppercase">
-          <div className="relative h-[50vh] w-full">
-            <img src={selectedArticle.image} className="w-full h-full object-cover" alt="hero" />
-            <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 to-transparent"></div>
-            <button onClick={() => setSelectedArticle(null)} className="absolute top-10 left-10 p-4 bg-black/30 backdrop-blur-md rounded-full text-white hover:bg-black/50 transition-all"><ChevronLeft /></button>
-            <div className="absolute bottom-12 left-12 text-white max-w-4xl">
-              <span className="bg-emerald-500 px-4 py-1.5 rounded-lg text-[10px] mb-6 inline-block shadow-lg">{selectedArticle.category || "FIELD REPORT"}</span>
-              <h1 className="text-6xl tracking-tighter leading-none mb-4 drop-shadow-lg">{selectedArticle.headline || selectedArticle.name}</h1>
-            </div>
-          </div>
-          <div className="max-w-3xl mx-auto p-12 pb-32">
-            <p className="text-xl font-bold text-slate-900 leading-relaxed mb-12 normal-case">{selectedArticle.content || selectedArticle.bio}</p>
-            <div className="border-t pt-12">
-              <h4 className="text-xl mb-8 flex items-center gap-3"><MessageCircle className="w-6 h-6" /> Intel Chatter</h4>
-              <div className="flex gap-4">
-                <input value={commentInput} onChange={(e) => setCommentInput(e.target.value)} placeholder="Submit update..." className="flex-1 bg-slate-100 p-6 rounded-2xl outline-none font-black" />
-                <button onClick={() => { if (!commentInput) return; addKarma(5); setCommentInput(""); }} className="bg-slate-950 text-white p-6 rounded-2xl shadow-xl active:scale-95"><Send /></button>
+      <AnimatePresence>
+        {selectedArticle && (
+          <motion.div
+            initial={{ opacity: 0, scale: 1.1 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="fixed inset-0 z-[200] bg-white overflow-y-auto no-scrollbar"
+          >
+            <div className="relative h-[50vh] w-full">
+              <SafeImage src={selectedArticle.image} className="w-full h-full object-cover" />
+              <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 to-transparent"></div>
+              <motion.button
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
+                onClick={() => setSelectedArticle(null)}
+                className="absolute top-10 left-10 p-4 bg-black/30 backdrop-blur-md rounded-full text-white hover:bg-black/50 transition-all"
+              >
+                <ChevronLeft />
+              </motion.button>
+              <div className="absolute bottom-12 left-12 text-white max-w-4xl px-6">
+                <span className="bg-emerald-500 px-4 py-1.5 rounded-lg text-[10px] mb-6 inline-block shadow-lg font-black uppercase tracking-widest">
+                  {selectedArticle.category || "FIELD REPORT"}
+                </span>
+                <h1 className="text-4xl md:text-6xl tracking-tighter leading-tight mb-4 drop-shadow-xl font-black uppercase">
+                  {selectedArticle.headline || selectedArticle.name}
+                </h1>
               </div>
             </div>
-          </div>
-        </div>
-      )}
+            <div className="max-w-3xl mx-auto p-8 md:p-12 pb-32">
+              <p className="text-xl md:text-2xl font-medium text-slate-800 leading-relaxed mb-12 normal-case readable-text">
+                {selectedArticle.content || selectedArticle.bio}
+              </p>
+              <div className="border-t border-slate-100 pt-12">
+                <h4 className="text-xl font-black uppercase mb-8 flex items-center gap-3">
+                  <MessageCircle className="w-6 h-6" /> Intel Chatter
+                </h4>
+                <div className="flex gap-4">
+                  <input
+                    value={commentInput}
+                    onChange={(e) => setCommentInput(e.target.value)}
+                    placeholder="Submit update..."
+                    className="flex-1 bg-slate-50 p-6 rounded-2xl outline-none font-bold border-2 border-transparent focus:border-emerald-500/20 transition-all"
+                  />
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => { if (!commentInput) return; addKarma(5); setCommentInput(""); }}
+                    className="bg-slate-950 text-white p-6 rounded-2xl shadow-xl active:scale-95"
+                  >
+                    <Send />
+                  </motion.button>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* POST MODAL */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-[110] bg-slate-950/95 backdrop-blur-xl flex items-center justify-center p-6 animate-fade-in font-black uppercase">
-          <div className="bg-white w-full max-w-3xl rounded-[5rem] p-16 shadow-2xl relative max-h-[90vh] overflow-y-auto no-scrollbar border-[16px] border-white text-slate-950">
-            <div className="flex justify-between items-center mb-12">
-              <h2 className="text-5xl tracking-tighter leading-none">File Report 📂</h2>
-              <button onClick={() => setIsModalOpen(false)} className="p-4 hover:bg-slate-100 rounded-3xl transition-all"><X className="w-8 h-8" /></button>
-            </div>
-            <div className="space-y-12">
-              <div className="h-80 bg-slate-950 border-4 border-dashed border-slate-800 rounded-[2.5rem] flex flex-col items-center justify-center relative group overflow-hidden">
-                {postForm.image ? (
-                  <img src={postForm.image} className="w-full h-full object-cover" alt="preview" />
-                ) : (
-                  <div className="text-center">
-                    <ImageIcon className="text-emerald-500/20 w-16 h-16 mx-auto mb-4 group-hover:scale-110 transition-transform" />
-                    <p className="text-[10px] text-emerald-500/40 tracking-[0.5em]">Capture Metadata</p>
-                  </div>
-                )}
-                <input type="file" onChange={async (e) => {
-                  const b64 = await convertToBase64(e.target.files[0]);
-                  setPostForm({ ...postForm, image: b64 });
-                }} className="absolute inset-0 opacity-0 cursor-pointer" />
+      <AnimatePresence>
+        {isModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] bg-slate-950/95 backdrop-blur-xl flex items-center justify-center p-6"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-white w-full max-w-3xl rounded-[4rem] p-8 md:p-16 shadow-2xl relative max-h-[90vh] overflow-y-auto no-scrollbar border-[12px] border-white text-slate-950"
+            >
+              <div className="flex justify-between items-center mb-12">
+                <h2 className="text-4xl md:text-5xl font-black uppercase tracking-tighter leading-none">File Report 📂</h2>
+                <button onClick={() => setIsModalOpen(false)} className="p-4 hover:bg-slate-100 rounded-3xl transition-all"><X className="w-8 h-8" /></button>
               </div>
-              <div className="space-y-6">
-                <input value={postForm.title} onChange={(e) => setPostForm({ ...postForm, title: e.target.value })} placeholder="Title / Name" className="w-full p-6 bg-slate-950 text-emerald-400 rounded-[2.5rem] outline-none shadow-xl" />
-                <textarea value={postForm.desc} onChange={(e) => setPostForm({ ...postForm, desc: e.target.value })} rows="4" placeholder="Description..." className="w-full p-6 bg-slate-950 text-emerald-400 rounded-[2.5rem] outline-none shadow-xl" />
+              <div className="space-y-10">
+                <div className="h-80 bg-slate-50 border-4 border-dashed border-slate-200 rounded-[3rem] flex flex-col items-center justify-center relative group overflow-hidden">
+                  {postForm.image ? (
+                    <img src={postForm.image} className="w-full h-full object-cover" alt="preview" />
+                  ) : (
+                    <div className="text-center">
+                      <ImageIcon className="text-slate-300 w-16 h-16 mx-auto mb-4 group-hover:scale-110 transition-transform" />
+                      <p className="text-[10px] text-slate-400 tracking-[0.4em] font-black uppercase">Capture Metadata</p>
+                    </div>
+                  )}
+                  <input type="file" onChange={async (e) => {
+                    const b64 = await convertToBase64(e.target.files[0]);
+                    setPostForm({ ...postForm, image: b64 });
+                  }} className="absolute inset-0 opacity-0 cursor-pointer" />
+                </div>
+                <div className="space-y-4">
+                  <input value={postForm.title} onChange={(e) => setPostForm({ ...postForm, title: e.target.value })} placeholder="Title / Name" className="w-full p-7 bg-slate-50 border-2 border-transparent focus:border-emerald-500/20 text-slate-900 font-bold rounded-[2rem] outline-none transition-all shadow-sm" />
+                  <textarea value={postForm.desc} onChange={(e) => setPostForm({ ...postForm, desc: e.target.value })} rows="4" placeholder="Description..." className="w-full p-7 bg-slate-50 border-2 border-transparent focus:border-emerald-500/20 text-slate-900 font-bold rounded-[2rem] outline-none transition-all shadow-sm" />
+                </div>
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={handlePostSubmit}
+                  className="w-full py-8 bg-slate-950 text-white rounded-[2.5rem] font-black uppercase tracking-[0.4em] text-[10px] shadow-2xl hover:bg-emerald-600 transition-all mt-4"
+                >
+                  Transmit Intel 📡
+                </motion.button>
               </div>
-              <button onClick={handlePostSubmit} className="w-full py-8 bg-slate-950 text-white rounded-[3rem] tracking-[0.6em] text-[10px] shadow-2xl hover:bg-emerald-500 transition-all active:scale-95">Transmit Intel 📡</button>
-            </div>
-          </div>
-        </div>
-      )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -647,48 +892,94 @@ const ScannerView = ({ onScanComplete }) => {
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-12 animate-fade-in text-center font-black uppercase py-12">
-      {!image ? (
-        <div className="h-[550px] border-[8px] border-dashed border-slate-950 rounded-[4rem] flex flex-col items-center justify-center relative hover:bg-emerald-50 transition-all cursor-pointer shadow-inner bg-white group">
-          <ImageIcon className="w-16 h-16 text-slate-950 mb-6 animate-float" />
-          <p className="text-[12px] tracking-[0.6em] text-slate-950">Upload Medical Scan 📸</p>
-          <input type="file" accept="image/*" onChange={handleUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
-        </div>
-      ) : (
-        <div className="space-y-12">
-          <div className="h-[550px] rounded-[4rem] overflow-hidden relative shadow-2xl border-[12px] border-white bg-slate-950">
-            <img src={image} className="w-full h-full object-cover" alt="target" />
-            {analyzing && (
-              <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-2xl flex flex-col items-center justify-center text-emerald-500">
-                <RefreshCw className="w-16 h-16 animate-spin mb-8" />
-                <p className="text-xl tracking-[0.8em] animate-pulse">Bio-Diagnostics...</p>
+    <div className="max-w-4xl mx-auto space-y-12 text-center font-bold py-12 px-6">
+      <AnimatePresence mode="wait">
+        {!image ? (
+          <motion.div
+            key="upload"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 1.05 }}
+            className="h-[550px] border-[8px] border-dashed border-slate-950 rounded-[4rem] flex flex-col items-center justify-center relative hover:bg-emerald-50 transition-all cursor-pointer shadow-inner bg-white group"
+          >
+            <motion.div
+              animate={{ y: [0, -10, 0] }}
+              transition={{ duration: 3, repeat: Infinity }}
+            >
+              <ImageIcon className="w-16 h-16 text-slate-950 mb-6" />
+            </motion.div>
+            <p className="text-[12px] tracking-[0.6em] text-slate-950 font-black uppercase">Upload Medical Scan 📸</p>
+            <input type="file" accept="image/*" onChange={handleUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
+          </motion.div>
+        ) : (
+          <motion.div
+            key="results"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-12"
+          >
+            <div className="h-[550px] rounded-[4rem] overflow-hidden relative shadow-2xl border-[12px] border-white bg-slate-950">
+              <img src={image} className="w-full h-full object-cover" alt="target" />
+              <AnimatePresence>
+                {analyzing && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="absolute inset-0 bg-slate-950/80 backdrop-blur-2xl flex flex-col items-center justify-center text-emerald-500"
+                  >
+                    <RefreshCw className="w-16 h-16 animate-spin mb-8" />
+                    <p className="text-xl tracking-[0.8em] font-black uppercase animate-pulse">Bio-Diagnostics...</p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              <div className="absolute inset-0 pointer-events-none opacity-20">
+                <div className="w-full h-full animate-scan shadow-[0_0_20px_4px_#10b981]"></div>
               </div>
-            )}
-            <div className="absolute inset-0 pointer-events-none opacity-20">
-              <div className="w-full h-full animate-scan shadow-[0_0_20px_4px_#10b981]"></div>
             </div>
-          </div>
-          {result && (
-            <div className="bg-slate-950 p-20 rounded-[4rem] text-white text-left animate-slide-up border-[8px] border-white/5 relative shadow-2xl">
-              <h4 className="text-6xl tracking-tighter text-emerald-400 mb-4 font-black">{result.condition}</h4>
-              <div className="flex justify-between items-center border-b border-slate-800 pb-8 mb-8">
-                <p className="text-slate-400 text-xl tracking-widest">Subject: {result.breed}</p>
-                <span className="text-emerald-500 text-[10px] border border-emerald-500/30 px-4 py-1.5 rounded-full">{result.accuracy}</span>
-              </div>
-              <div className="bg-white/10 p-10 rounded-[2.5rem] border border-white/10 shadow-inner">
-                <div className="flex items-center gap-4 mb-6">
-                  <Stethoscope className="text-emerald-400 w-8 h-8" />
-                  <p className="text-emerald-400 text-xs tracking-[0.4em]">TREATMENT PROTOCOL:</p>
+
+            {result && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-slate-950 p-12 md:p-20 rounded-[4rem] text-white text-left border-[8px] border-white/5 relative shadow-2xl"
+              >
+                <div className="mb-8">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="bg-emerald-500/20 p-2 rounded-lg">
+                      <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                    </div>
+                    <span className="text-emerald-500 text-[10px] tracking-[0.3em] font-black uppercase">Diagnostic Result</span>
+                  </div>
+                  <h4 className="text-4xl md:text-5xl tracking-tighter text-white font-black leading-tight normal-case">{result.condition.toLowerCase().replace(/^\w/, c => c.toUpperCase())}</h4>
                 </div>
-                <p className="text-white normal-case font-medium text-2xl leading-relaxed">{result.advice}</p>
-              </div>
-              <button onClick={() => { setImage(null); setResult(null); }} className="w-full mt-10 py-8 bg-emerald-500 text-white rounded-[2.5rem] tracking-[0.5em] font-black flex items-center justify-center gap-3 shadow-xl hover:bg-emerald-400 transition-all active:scale-95">
-                <RotateCcw className="w-5 h-5" /> New Scan
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+
+                <div className="flex flex-wrap justify-between items-center border-b border-slate-800 pb-8 mb-8 gap-4">
+                  <p className="text-slate-400 text-lg tracking-wide font-medium">Subject: <span className="text-white font-bold">{result.breed}</span></p>
+                  <span className="text-emerald-500 text-[11px] font-black border border-emerald-500/30 px-6 py-2 rounded-full bg-emerald-500/5">{result.accuracy}</span>
+                </div>
+
+                <div className="bg-white/5 p-8 md:p-12 rounded-[3rem] border border-white/5 shadow-inner">
+                  <div className="flex items-center gap-4 mb-6">
+                    <Stethoscope className="text-emerald-400 w-8 h-8" />
+                    <p className="text-emerald-400 text-xs tracking-[0.4em] font-black uppercase">TREATMENT PROTOCOL:</p>
+                  </div>
+                  <p className="text-slate-200 normal-case font-medium text-xl md:text-2xl leading-relaxed readable-text">{result.advice}</p>
+                </div>
+
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => { setImage(null); setResult(null); }}
+                  className="w-full mt-10 py-8 bg-emerald-500 text-white rounded-[2.5rem] tracking-[0.4em] font-black uppercase flex items-center justify-center gap-3 shadow-xl hover:bg-emerald-400 transition-all"
+                >
+                  <RotateCcw className="w-5 h-5" /> New Scan
+                </motion.button>
+              </motion.div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
-}
+};

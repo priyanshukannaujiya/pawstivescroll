@@ -31,3 +31,5 @@ tfenv/
 .venv copy/
 animal-welfare-app/venv/
 app.py
+.vercel
+.env*.local
